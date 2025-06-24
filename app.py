@@ -30,6 +30,21 @@ for dir_name in ['data', 'models', 'static/plots', 'temp']:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom JSON encoder to handle numpy/pandas dtypes
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif hasattr(obj, 'dtype'):  # Handle pandas dtypes
+            return str(obj)
+        return super().default(obj)
+
+app.json_encoder = CustomJSONEncoder
+
 class BackendManager:
     """Manages backend operations and real-time communication"""
     
@@ -53,13 +68,14 @@ class BackendManager:
         return self.active_sessions.get(session_id)
     
     def emit_progress(self, session_id, message, progress, data=None):
-        """Emit progress update to specific session"""
-        socketio.emit('training_progress', {
-            'message': message,
-            'progress': progress,
-            'data': data,
-            'timestamp': datetime.now().isoformat()
-        }, room=session_id)
+        """Emit progress update to specific session using app context"""
+        with app.app_context():
+            socketio.emit('training_progress', {
+                'message': message,
+                'progress': progress,
+                'data': data,
+                'timestamp': datetime.now().isoformat()
+            }, room=session_id)
 
 backend_manager = BackendManager()
 
@@ -130,6 +146,11 @@ def get_dataset_info(filename):
                     'percentage': float(missing_count / len(df) * 100)
                 }
         
+        # Convert dtypes to string to avoid JSON serialization issues
+        dtypes_dict = {}
+        for col, dtype in df.dtypes.items():
+            dtypes_dict[col] = str(dtype)
+        
         return jsonify({
             'success': True,
             'dataset_info': {
@@ -138,7 +159,7 @@ def get_dataset_info(filename):
                 'columns': column_info,
                 'missing_values': missing_info,
                 'quality_report': quality_report,
-                'dtypes': df.dtypes.to_dict(),
+                'dtypes': dtypes_dict,
                 'memory_usage': float(df.memory_usage(deep=True).sum() / 1024 / 1024)  # MB
             }
         })
@@ -146,6 +167,117 @@ def get_dataset_info(filename):
     except Exception as e:
         logger.error(f"Error getting dataset info: {str(e)}")
         return jsonify({'error': f'Failed to get dataset info: {str(e)}'}), 500
+
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    session_id = str(uuid.uuid4())
+    backend_manager.create_session(session_id)
+    emit('session_created', {'session_id': session_id})
+    logger.info(f"Client connected with session: {session_id}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info("Client disconnected")
+
+@socketio.on('start_training')
+def handle_training(data):
+    """Handle training request with real-time progress updates"""
+    session_id = data.get('session_id')
+    dataset = data.get('dataset')
+    config = data.get('config', {})
+    
+    # Ensure config has required defaults
+    default_config = {
+        'test_size': 0.2,
+        'random_state': 42,
+        'cross_validation_folds': 5,
+        'feature_selection_k': 'all',
+        'scaling_method': 'standard',  # Fix for missing scaling_method
+        'hyperparameter_tuning': True,
+        'feature_engineering': True,
+        'model_evaluation_metrics': ['r2', 'mse', 'mae', 'rmse', 'explained_variance']
+    }
+    
+    # Merge user config with defaults
+    for key, value in default_config.items():
+        if key not in config:
+            config[key] = value
+    
+    session = backend_manager.get_session(session_id)
+    if not session:
+        with app.app_context():
+            emit('training_error', {'error': 'Invalid session'})
+        return
+    
+    def training_worker():
+        try:
+            dataset_path = os.path.join('data', dataset)
+            if not os.path.exists(dataset_path):
+                with app.app_context():
+                    socketio.emit('training_error', {'error': 'Dataset not found'}, room=session_id)
+                return
+            
+            # Initialize pipeline with custom config
+            pipeline = RegressionPipeline(config)
+            
+            # Progress callback for real-time updates
+            def progress_callback(message, progress):
+                backend_manager.emit_progress(session_id, message, progress)
+            
+            # Load and preprocess data
+            backend_manager.emit_progress(session_id, "Loading dataset...", 5)
+            X, y, df = pipeline.load_and_preprocess_data(dataset_path)
+            
+            if X is None:
+                with app.app_context():
+                    socketio.emit('training_error', {'error': 'Failed to load dataset'}, room=session_id)
+                return
+            
+            backend_manager.emit_progress(session_id, "Dataset loaded successfully", 10)
+            
+            # Train models
+            backend_manager.emit_progress(session_id, "Starting model training...", 15)
+            pipeline.train_models(X, y, progress_callback)
+            
+            # Generate plots
+            backend_manager.emit_progress(session_id, "Generating visualizations...", 90)
+            dataset_name = dataset.replace('.csv', '')
+            plots = pipeline.generate_plots(dataset_name, progress_callback)
+            
+            # Prepare results - convert to JSON-serializable format
+            model_summary = pipeline.get_model_summary()
+            
+            # Convert numpy types in model_summary to Python types
+            json_safe_summary = {}
+            for model_name, metrics in model_summary.items():
+                json_safe_summary[model_name] = {}
+                for metric_name, value in metrics.items():
+                    if isinstance(value, (np.integer, np.floating)):
+                        json_safe_summary[model_name][metric_name] = float(value)
+                    elif isinstance(value, np.ndarray):
+                        json_safe_summary[model_name][metric_name] = value.tolist()
+                    else:
+                        json_safe_summary[model_name][metric_name] = value
+            
+            # Final progress update with results
+            backend_manager.emit_progress(session_id, "Training completed!", 100, {
+                'model_summary': json_safe_summary,
+                'plots': plots,
+                'dataset_info': pipeline.data_info
+            })
+            
+        except Exception as e:
+            logger.error(f"Training error: {str(e)}")
+            with app.app_context():
+                socketio.emit('training_error', {'error': str(e)}, room=session_id)
+    
+    # Start training in a separate thread
+    training_thread = threading.Thread(target=training_worker)
+    training_thread.daemon = True
+    training_thread.start()
 
 @app.route('/api/apply_cleaning', methods=['POST'])
 def apply_cleaning():
@@ -317,84 +449,6 @@ def export_results(dataset_name):
     except Exception as e:
         logger.error(f"Export error: {str(e)}")
         return jsonify({'error': f'Export failed: {str(e)}'}), 500
-
-# WebSocket event handlers
-@socketio.on('connect')
-def handle_connect():
-    """Handle client connection"""
-    session_id = str(uuid.uuid4())
-    backend_manager.create_session(session_id)
-    emit('session_created', {'session_id': session_id})
-    logger.info(f"Client connected with session: {session_id}")
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    logger.info("Client disconnected")
-
-@socketio.on('start_training')
-def handle_training(data):
-    """Handle training request with real-time progress updates"""
-    session_id = data.get('session_id')
-    dataset = data.get('dataset')
-    config = data.get('config', {})
-    
-    session = backend_manager.get_session(session_id)
-    if not session:
-        emit('training_error', {'error': 'Invalid session'})
-        return
-    
-    def training_worker():
-        try:
-            dataset_path = os.path.join('data', dataset)
-            if not os.path.exists(dataset_path):
-                emit('training_error', {'error': 'Dataset not found'})
-                return
-            
-            # Initialize pipeline with custom config
-            pipeline = RegressionPipeline(config)
-            
-            # Progress callback for real-time updates
-            def progress_callback(message, progress):
-                backend_manager.emit_progress(session_id, message, progress)
-            
-            # Load and preprocess data
-            backend_manager.emit_progress(session_id, "Loading dataset...", 5)
-            X, y, df = pipeline.load_and_preprocess_data(dataset_path)
-            
-            if X is None:
-                emit('training_error', {'error': 'Failed to load dataset'})
-                return
-            
-            backend_manager.emit_progress(session_id, "Dataset loaded successfully", 10)
-            
-            # Train models
-            backend_manager.emit_progress(session_id, "Starting model training...", 15)
-            pipeline.train_models(X, y, progress_callback)
-            
-            # Generate plots
-            backend_manager.emit_progress(session_id, "Generating visualizations...", 90)
-            dataset_name = dataset.replace('.csv', '')
-            plots = pipeline.generate_plots(dataset_name, progress_callback)
-            
-            # Prepare results
-            model_summary = pipeline.get_model_summary()
-            
-            # Final progress update with results
-            backend_manager.emit_progress(session_id, "Training completed!", 100, {
-                'model_summary': model_summary,
-                'plots': plots,
-                'dataset_info': pipeline.data_info
-            })
-            
-        except Exception as e:
-            logger.error(f"Training error: {str(e)}")
-            emit('training_error', {'error': str(e)})
-    
-    # Start training in a separate thread
-    training_thread = threading.Thread(target=training_worker)
-    training_thread.daemon = True
-    training_thread.start()
 
 @app.route('/health')
 def health_check():
