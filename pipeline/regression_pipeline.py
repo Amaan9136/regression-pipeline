@@ -16,6 +16,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, E
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, explained_variance_score
 import warnings
 warnings.filterwarnings('ignore')
@@ -87,7 +88,15 @@ class RegressionPipeline:
             ),
             'Support Vector Regression': SVR(),
             'Decision Tree': DecisionTreeRegressor(random_state=self.config['random_state']),
-            'K-Nearest Neighbors': KNeighborsRegressor()
+            'K-Nearest Neighbors': KNeighborsRegressor(),
+            'Neural Network': MLPRegressor(
+                hidden_layer_sizes=(100, 50),
+                random_state=self.config['random_state'],
+                max_iter=1000,
+                early_stopping=True,
+                validation_fraction=0.1,
+                n_iter_no_change=10
+            )
         }
     
     def _initialize_hyperparameters(self):
@@ -121,6 +130,11 @@ class RegressionPipeline:
             'K-Nearest Neighbors': {
                 'n_neighbors': [3, 5, 7, 10],
                 'weights': ['uniform', 'distance']
+            },
+            'Neural Network': {
+                'hidden_layer_sizes': [(50,), (100,), (100, 50)],
+                'learning_rate_init': [0.001, 0.01, 0.1],
+                'alpha': [0.0001, 0.001, 0.01]
             }
         }
     
@@ -128,8 +142,26 @@ class RegressionPipeline:
         """Load and preprocess data from CSV file"""
         try:
             print(f"Loading dataset from: {file_path}")
-            df = pd.read_csv(file_path)
+            
+            # Try different encodings to handle various file formats
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            df = None
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    print(f"Successfully loaded with {encoding} encoding")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if df is None:
+                raise ValueError("Could not load file with any encoding")
+            
             print(f"Loaded dataset with shape: {df.shape}")
+            
+            # Clean column names
+            df.columns = df.columns.str.strip()
             
             # Store data info
             self.data_info = {
@@ -161,23 +193,15 @@ class RegressionPipeline:
             print(f"After handling missing values: {df.shape}")
             
             # Separate features and target
-            # Assume last column is target, or look for common target names
-            target_column = None
-            common_targets = ['target', 'label', 'y', 'price', 'value', 'output', 'strength']
-            
-            for col in common_targets:
-                if col in df.columns:
-                    target_column = col
-                    break
-            
-            if target_column is None:
-                target_column = df.columns[-1]  # Use last column as default
-            
+            target_column = self._identify_target_column(df)
             print(f"Using '{target_column}' as target column")
             
             # Separate features and target
             X = df.drop(columns=[target_column])
             y = df[target_column]
+            
+            # Validate target variable for regression
+            y = self._validate_and_prepare_target(y)
             
             print(f"Features shape: {X.shape}, Target shape: {y.shape}")
             
@@ -191,6 +215,9 @@ class RegressionPipeline:
             X, self.categorical_encoders = self._encode_categorical_variables(X)
             print(f"After encoding: {X.shape}")
             
+            # Ensure all features are numeric
+            X = self._ensure_numeric_features(X)
+            
             print(f"Final data shapes - X: {X.shape}, y: {y.shape}")
             
             return X, y, df
@@ -198,6 +225,74 @@ class RegressionPipeline:
         except Exception as e:
             print(f"Error loading/preprocessing data: {str(e)}")
             return None, None, None
+    
+    def _identify_target_column(self, df):
+        """Identify the target column from the dataframe"""
+        target_column = None
+        
+        # Look for common target names
+        common_targets = [
+            'target', 'label', 'y', 'price', 'value', 'output', 'strength',
+            'compressive_strength', 'tensile_strength', 'youngs_modulus'
+        ]
+        
+        for col in common_targets:
+            if col in df.columns:
+                target_column = col
+                break
+        
+        # If not found, use the last column
+        if target_column is None:
+            target_column = df.columns[-1]
+        
+        return target_column
+    
+    def _validate_and_prepare_target(self, y):
+        """Validate and prepare target variable for regression"""
+        # Handle string targets (convert to numeric if possible)
+        if y.dtype == 'object':
+            print("Target variable is categorical, attempting to convert to numeric...")
+            try:
+                # Try to convert to numeric
+                y_numeric = pd.to_numeric(y, errors='coerce')
+                
+                # If conversion successful (no NaN values)
+                if not y_numeric.isnull().any():
+                    print("Successfully converted target to numeric")
+                    return y_numeric
+                else:
+                    # Encode categorical target
+                    print("Encoding categorical target variable...")
+                    self.target_encoder = LabelEncoder()
+                    y_encoded = self.target_encoder.fit_transform(y.astype(str))
+                    print(f"Encoded {len(self.target_encoder.classes_)} categories")
+                    return pd.Series(y_encoded, index=y.index)
+            except:
+                # Fallback to label encoding
+                print("Encoding categorical target variable...")
+                self.target_encoder = LabelEncoder()
+                y_encoded = self.target_encoder.fit_transform(y.astype(str))
+                print(f"Encoded {len(self.target_encoder.classes_)} categories")
+                return pd.Series(y_encoded, index=y.index)
+        
+        # Convert to float to ensure consistency
+        return y.astype(float)
+    
+    def _ensure_numeric_features(self, X):
+        """Ensure all features are numeric"""
+        for col in X.columns:
+            if X[col].dtype == 'object':
+                try:
+                    X[col] = pd.to_numeric(X[col], errors='coerce')
+                    X[col].fillna(X[col].median(), inplace=True)
+                except:
+                    # If conversion fails, use label encoding
+                    le = LabelEncoder()
+                    X[col] = le.fit_transform(X[col].astype(str))
+                    if col not in self.categorical_encoders:
+                        self.categorical_encoders[col] = le
+        
+        return X.astype(float)
     
     def _apply_feature_engineering(self, X):
         """Apply feature engineering techniques"""
@@ -230,11 +325,14 @@ class RegressionPipeline:
         
         # Log transform for highly skewed features
         for col in numerical_cols:
-            skewness = X_engineered[col].skew()
-            if abs(skewness) > 2 and (X_engineered[col] > 0).all():
-                feature_name = f'{col}_log'
-                X_engineered[feature_name] = np.log1p(X_engineered[col])
-                print(f"Created log feature for skewed column {col} (skewness: {skewness:.2f})")
+            try:
+                skewness = X_engineered[col].skew()
+                if abs(skewness) > 2 and (X_engineered[col] > 0).all():
+                    feature_name = f'{col}_log'
+                    X_engineered[feature_name] = np.log1p(X_engineered[col])
+                    print(f"Created log feature for skewed column {col} (skewness: {skewness:.2f})")
+            except:
+                continue
         
         return X_engineered
     
@@ -375,18 +473,23 @@ class RegressionPipeline:
                 metrics = self._calculate_metrics(y_train, y_pred_train, y_test, y_pred_test)
                 
                 # Cross-validation score
-                cv_scores = cross_val_score(
-                    best_model, X_train_processed, y_train, 
-                    cv=self.config['cross_validation_folds'], 
-                    scoring='r2',
-                    n_jobs=-1
-                )
-                metrics['cv_score'] = cv_scores.mean()
-                metrics['cv_std'] = cv_scores.std()
+                try:
+                    cv_scores = cross_val_score(
+                        best_model, X_train_processed, y_train, 
+                        cv=self.config['cross_validation_folds'], 
+                        scoring='r2',
+                        n_jobs=-1
+                    )
+                    metrics['cv_score'] = cv_scores.mean()
+                    metrics['cv_std'] = cv_scores.std()
+                except:
+                    metrics['cv_score'] = np.nan
+                    metrics['cv_std'] = np.nan
                 
                 print(f"  - R² Score: {metrics['r2']:.4f}")
                 print(f"  - RMSE: {metrics['rmse']:.4f}")
-                print(f"  - CV Score: {metrics['cv_score']:.4f} ± {metrics['cv_std']:.4f}")
+                if not np.isnan(metrics['cv_score']):
+                    print(f"  - CV Score: {metrics['cv_score']:.4f} ± {metrics['cv_std']:.4f}")
                 
                 # Store results
                 self.results[name] = metrics
@@ -435,106 +538,6 @@ class RegressionPipeline:
             print(f"  - Model saved: {model_filename}")
         except Exception as e:
             print(f"  - Error saving model: {str(e)}")
-    
-    def generate_plots(self, dataset_name, progress_callback=None):
-        """Generate visualization plots"""
-        plots = {}
-        plot_types = [
-            'model_comparison',
-            'feature_importance', 
-            'residuals',
-            'prediction_vs_actual',
-            'learning_curves'
-        ]
-        
-        for i, plot_type in enumerate(plot_types):
-            try:
-                if progress_callback:
-                    progress_callback(f"Generating {plot_type} plot...", 90 + (i / len(plot_types)) * 10)
-                
-                plot_path = self._create_plot(plot_type, dataset_name)
-                if plot_path:
-                    plots[plot_type] = plot_path
-                    
-            except Exception as e:
-                print(f"Error creating {plot_type} plot: {str(e)}")
-        
-        return plots
-    
-    def _create_plot(self, plot_type, dataset_name):
-        """Create individual plots"""
-        try:
-            plt.figure(figsize=(12, 8))
-            
-            if plot_type == 'model_comparison' and self.results:
-                # Model performance comparison
-                models = list(self.results.keys())
-                r2_scores = [self.results[model]['r2'] for model in models]
-                
-                plt.bar(models, r2_scores, color='skyblue', alpha=0.7)
-                plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
-                plt.xlabel('Models', fontsize=12)
-                plt.ylabel('R² Score', fontsize=12)
-                plt.xticks(rotation=45, ha='right')
-                plt.grid(axis='y', alpha=0.3)
-                
-                # Highlight best model
-                best_idx = models.index(self.best_model) if self.best_model in models else 0
-                plt.bar(models[best_idx], r2_scores[best_idx], color='orange', alpha=0.8)
-                
-                plt.tight_layout()
-                title = f'{dataset_name}_model_comparison'
-                
-            elif plot_type == 'feature_importance' and self.best_model and self.best_model in self.trained_models:
-                # Feature importance (for tree-based models)
-                best_model_obj = self.trained_models[self.best_model]['model']
-                
-                if hasattr(best_model_obj, 'feature_importances_'):
-                    importances = best_model_obj.feature_importances_
-                    n_features = len(importances)
-                    feature_names = [f'Feature_{i}' for i in range(n_features)]
-                    
-                    # Sort features by importance
-                    indices = np.argsort(importances)[::-1][:15]  # Top 15 features
-                    
-                    plt.bar(range(len(indices)), importances[indices], color='lightgreen', alpha=0.7)
-                    plt.title(f'Feature Importance - {self.best_model}', fontsize=16, fontweight='bold')
-                    plt.xlabel('Features', fontsize=12)
-                    plt.ylabel('Importance', fontsize=12)
-                    plt.xticks(range(len(indices)), [feature_names[i] for i in indices], rotation=45, ha='right')
-                    plt.grid(axis='y', alpha=0.3)
-                    plt.tight_layout()
-                    title = f'{dataset_name}_feature_importance'
-                else:
-                    # Create placeholder for models without feature importance
-                    plt.text(0.5, 0.5, f'Feature importance not available\nfor {self.best_model}', 
-                            ha='center', va='center', transform=plt.gca().transAxes,
-                            fontsize=14, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
-                    plt.title('Feature Importance', fontsize=16, fontweight='bold')
-                    plt.axis('off')
-                    title = f'{dataset_name}_feature_importance'
-            else:
-                # For other plot types, create informational plots
-                plt.text(0.5, 0.5, f'{plot_type.replace("_", " ").title()}\n(Available after training completion)', 
-                        ha='center', va='center', transform=plt.gca().transAxes,
-                        fontsize=14, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
-                plt.title(plot_type.replace('_', ' ').title(), fontsize=16, fontweight='bold')
-                plt.axis('off')
-                title = f'{dataset_name}_{plot_type}'
-            
-            # Save plot
-            os.makedirs('static/plots', exist_ok=True)
-            plot_filename = f"{title}.png"
-            plot_path = f"static/plots/{plot_filename}"
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            
-            return f"/static/plots/{plot_filename}"
-            
-        except Exception as e:
-            print(f"Error creating {plot_type} plot: {str(e)}")
-            plt.close()
-            return None
     
     def get_model_summary(self):
         """Get summary of all trained models"""

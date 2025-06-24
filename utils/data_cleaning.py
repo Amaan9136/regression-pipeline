@@ -1,117 +1,295 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, StandardScaler, RobustScaler, MinMaxScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import LabelEncoder
+import warnings
+warnings.filterwarnings('ignore')
 
 class DataCleaner:
     def __init__(self):
-        self.encoding_mappings = {}
-        self.column_mappings = {}
-        self.original_columns = []
         self.cleaning_history = []
+        self.encoders = {}
     
-    def preview_data(self, file_path, nrows=100):
-        """Preview the first few rows of the dataset"""
+    def clean_concrete_dataset(self, input_file='cleaning/SCM-concrete-global.csv', 
+                              output_file='SCM-based-concrete-formated.csv'):
+        """
+        Clean and format the concrete dataset for regression analysis
+        """
         try:
-            df = pd.read_csv(file_path, nrows=nrows)
+            print(f"Loading dataset from: {input_file}")
             
-            preview_info = {
-                'shape': df.shape,
-                'columns': list(df.columns),
-                'dtypes': df.dtypes.to_dict(),
-                'head': df.head().to_dict('records'),
-                'missing_values': df.isnull().sum().to_dict(),
-                'summary_stats': df.describe().to_dict(),
-                'memory_usage': df.memory_usage(deep=True).sum(),
-                'duplicate_rows': df.duplicated().sum()
+            # Try different encodings
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            df = None
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(input_file, encoding=encoding)
+                    print(f"Successfully loaded with {encoding} encoding")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if df is None:
+                raise ValueError("Could not load file with any encoding")
+            
+            # Clean column names
+            df.columns = df.columns.str.strip()
+            print(f"Original shape: {df.shape}")
+            print(f"Columns: {list(df.columns)}")
+            
+            # Create column mapping for standardization
+            column_mapping = {
+                'Cement(kg/m3)': 'cement_opc',
+                'Cement (kg/m3)': 'cement_opc',
+                'cement': 'cement_opc',
+                'FA (kg/m3)': 'scm_flyash',
+                'flyash': 'scm_flyash',
+                'Fly ash': 'scm_flyash',
+                'GGBFS (kg/m3)': 'scm_ggbs',
+                'GGBS': 'scm_ggbs',
+                'slag': 'scm_ggbs',
+                'Fine aggregate(kg/m3)': 'locally_avail_sand',
+                'Fine aggregate (kg/m3)': 'locally_avail_sand',
+                'sand': 'locally_avail_sand',
+                'Splitting tensile strength (MPa)': 'tensile_strength',
+                'Tensile strength': 'tensile_strength',
+                'tensile': 'tensile_strength',
+                'Cylinder compressive strength (MPa)': 'compressive_strength',
+                'Compressive strength': 'compressive_strength',
+                'compressive': 'compressive_strength',
+                'Elastic modulus (GPa)': 'youngs_modulus',
+                'Elastic modulus': 'youngs_modulus',
+                'modulus': 'youngs_modulus',
+                'SP (kg/m3)': 'superplasticizer',
+                'Superplasticizer': 'superplasticizer',
+                'sp': 'superplasticizer',
+                'Water(kg/m3)': 'water',
+                'Water (kg/m3)': 'water',
+                'water': 'water',
+                'Coarse aggregate(kg/m3)': 'coarse_agg',
+                'Coarse aggregate (kg/m3)': 'coarse_agg',
+                'coarse': 'coarse_agg',
+                'aggregate': 'coarse_agg'
             }
             
-            # Identify potential issues
-            issues = []
-            for col in df.columns:
-                if df[col].isnull().sum() > 0:
-                    issues.append(f"Missing values in '{col}': {df[col].isnull().sum()}")
+            # Apply column mapping
+            for old_name, new_name in column_mapping.items():
+                if old_name in df.columns:
+                    df = df.rename(columns={old_name: new_name})
+                    print(f"Renamed '{old_name}' to '{new_name}'")
+            
+            # Add missing columns with default values
+            required_columns = [
+                'cement_opc', 'scm_flyash', 'scm_ggbs', 'silica_sand', 
+                'locally_avail_sand', 'water', 'superplasticizer', 'coarse_agg',
+                'tensile_strength', 'compressive_strength', 'youngs_modulus'
+            ]
+            
+            for col in required_columns:
+                if col not in df.columns:
+                    if col in ['silica_sand', 'perc_of_fibre', 'aspect_ratio', 'elongation']:
+                        df[col] = 0
+                        print(f"Added missing column '{col}' with default value 0")
+                    else:
+                        print(f"Warning: Required column '{col}' not found in dataset")
+            
+            # Ensure numeric types for all relevant columns
+            numeric_columns = [
+                'cement_opc', 'scm_flyash', 'scm_ggbs', 'locally_avail_sand',
+                'water', 'superplasticizer', 'coarse_agg', 'tensile_strength',
+                'compressive_strength', 'youngs_modulus'
+            ]
+            
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Handle missing values before calculations
+            print("Handling missing values...")
+            original_shape = df.shape
+            
+            # Drop rows where essential components are completely missing
+            essential_cols = ['cement_opc', 'water']
+            available_essential = [col for col in essential_cols if col in df.columns]
+            
+            if available_essential:
+                df = df.dropna(subset=available_essential)
+                print(f"Dropped rows with missing essential values. Shape: {original_shape} -> {df.shape}")
+            
+            # Fill missing values for other columns
+            for col in numeric_columns:
+                if col in df.columns and df[col].isnull().any():
+                    if col in ['scm_flyash', 'scm_ggbs', 'superplasticizer']:
+                        # These can be zero
+                        df[col].fillna(0, inplace=True)
+                    else:
+                        # Use median for other columns
+                        df[col].fillna(df[col].median(), inplace=True)
+                    print(f"Filled missing values in '{col}'")
+            
+            # Calculate derived features
+            print("Calculating derived features...")
+            
+            # Water-binder ratio
+            if all(col in df.columns for col in ['cement_opc', 'water']):
+                binder_cols = ['cement_opc']
+                if 'scm_flyash' in df.columns:
+                    binder_cols.append('scm_flyash')
+                if 'scm_ggbs' in df.columns:
+                    binder_cols.append('scm_ggbs')
                 
-                if df[col].dtype == 'object':
-                    unique_ratio = df[col].nunique() / len(df)
-                    if unique_ratio > 0.9:
-                        issues.append(f"High cardinality in '{col}': {df[col].nunique()} unique values")
+                binder = df[binder_cols].sum(axis=1)
+                df['w_b'] = df['water'] / binder.replace(0, np.nan)
+                print("Calculated water-binder ratio")
             
-            preview_info['potential_issues'] = issues
+            # HRWR/binder ratio
+            if all(col in df.columns for col in ['superplasticizer']) and 'w_b' in df.columns:
+                binder = df['water'] / df['w_b'].replace(0, np.nan)
+                df['hrwr_b'] = df['superplasticizer'] / binder.replace(0, np.nan)
+                print("Calculated HRWR-binder ratio")
             
-            return preview_info
+            # Density calculation
+            density_cols = []
+            for col in ['cement_opc', 'water', 'coarse_agg', 'locally_avail_sand', 'scm_flyash', 'scm_ggbs']:
+                if col in df.columns:
+                    density_cols.append(col)
+            
+            if density_cols:
+                df['density'] = df[density_cols].sum(axis=1)
+                print("Calculated density")
+            
+            # Add default values for missing engineered features
+            engineered_features = ['perc_of_fibre', 'aspect_ratio', 'elongation']
+            for col in engineered_features:
+                if col not in df.columns:
+                    df[col] = 0
+            
+            # Estimate missing target values using regression
+            if 'tensile_strength' in df.columns and 'compressive_strength' in df.columns:
+                self._estimate_missing_tensile_strength(df)
+            
+            # Define final column set
+            final_columns = [
+                'cement_opc', 'scm_flyash', 'scm_ggbs', 'silica_sand', 'locally_avail_sand',
+                'w_b', 'hrwr_b', 'perc_of_fibre', 'aspect_ratio', 'tensile_strength',
+                'density', 'youngs_modulus', 'elongation', 'compressive_strength'
+            ]
+            
+            # Keep only available columns
+            available_columns = [col for col in final_columns if col in df.columns]
+            df_final = df[available_columns].copy()
+            
+            # Final cleanup
+            df_final = df_final.dropna()
+            
+            # Validate data quality
+            self._validate_data_quality(df_final)
+            
+            # Save cleaned dataset
+            df_final.to_csv(output_file, index=False)
+            print(f"✅ Cleaning complete. Saved {df_final.shape[0]} rows and {df_final.shape[1]} columns to '{output_file}'")
+            print(f"Final columns: {list(df_final.columns)}")
+            
+            return df_final
             
         except Exception as e:
-            raise Exception(f"Error previewing data: {str(e)}")
+            print(f"Error during cleaning: {str(e)}")
+            raise
     
-    def get_column_info(self, df):
-        """Get detailed information about each column"""
-        column_info = {}
+    def _estimate_missing_tensile_strength(self, df):
+        """Estimate missing tensile strength values using regression"""
+        if 'tensile_strength' not in df.columns or 'compressive_strength' not in df.columns:
+            return
         
-        for col in df.columns:
-            info = {
-                'name': col,
-                'dtype': str(df[col].dtype),
-                'missing_count': int(df[col].isnull().sum()),
-                'missing_percentage': float(df[col].isnull().sum() / len(df) * 100),
-                'unique_values': int(df[col].nunique()),
-                'sample_values': df[col].dropna().head(5).tolist()
-            }
+        mask = df['tensile_strength'].isna()
+        if not mask.any():
+            return
+        
+        # Use available data to train regression model
+        train_data = df.dropna(subset=['compressive_strength', 'tensile_strength'])
+        
+        if len(train_data) > 5:  # Need minimum data for regression
+            try:
+                model = LinearRegression()
+                X_train = train_data[['compressive_strength']]
+                y_train = train_data['tensile_strength']
+                
+                model.fit(X_train, y_train)
+                
+                # Predict missing values
+                X_pred = df.loc[mask, ['compressive_strength']].dropna()
+                if len(X_pred) > 0:
+                    predictions = model.predict(X_pred)
+                    df.loc[X_pred.index, 'tensile_strength'] = predictions
+                    print(f"Estimated {len(predictions)} missing tensile strength values using regression")
             
-            if df[col].dtype in ['int64', 'float64']:
-                info.update({
-                    'min': float(df[col].min()) if not df[col].isnull().all() else None,
-                    'max': float(df[col].max()) if not df[col].isnull().all() else None,
-                    'mean': float(df[col].mean()) if not df[col].isnull().all() else None,
-                    'std': float(df[col].std()) if not df[col].isnull().all() else None,
-                    'skewness': float(df[col].skew()) if not df[col].isnull().all() else None
-                })
-            else:
-                info.update({
-                    'top_values': df[col].value_counts().head(5).to_dict()
-                })
+            except Exception as e:
+                print(f"Could not estimate tensile strength: {str(e)}")
+    
+    def _validate_data_quality(self, df):
+        """Validate the cleaned dataset quality"""
+        print("\n📊 Data Quality Report:")
+        print(f"Shape: {df.shape}")
+        print(f"Missing values: {df.isnull().sum().sum()}")
+        
+        # Check for outliers (simple IQR method)
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        outlier_counts = {}
+        
+        for col in numeric_cols:
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3 - Q1
+            outliers = ((df[col] < (Q1 - 1.5 * IQR)) | (df[col] > (Q3 + 1.5 * IQR))).sum()
+            if outliers > 0:
+                outlier_counts[col] = outliers
+        
+        if outlier_counts:
+            print(f"Potential outliers detected: {outlier_counts}")
+        else:
+            print("No obvious outliers detected")
+        
+        # Check data ranges
+        print("\nData ranges:")
+        for col in numeric_cols[:5]:  # Show first 5 columns
+            print(f"  {col}: {df[col].min():.2f} to {df[col].max():.2f}")
+    
+    def detect_outliers(self, df, method='iqr', threshold=1.5):
+        """Detect outliers in the dataset"""
+        outliers_info = {}
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        
+        for col in numeric_cols:
+            if method == 'iqr':
+                Q1 = df[col].quantile(0.25)
+                Q3 = df[col].quantile(0.75)
+                IQR = Q3 - Q1
+                lower_bound = Q1 - threshold * IQR
+                upper_bound = Q3 + threshold * IQR
+                outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
+                
+            elif method == 'zscore':
+                z_scores = np.abs((df[col] - df[col].mean()) / df[col].std())
+                outliers = df[z_scores > threshold]
             
-            column_info[col] = info
+            if len(outliers) > 0:
+                outliers_info[col] = {
+                    'count': len(outliers),
+                    'percentage': (len(outliers) / len(df)) * 100,
+                    'indices': outliers.index.tolist()
+                }
         
-        return column_info
-    
-    def drop_columns(self, df, columns_to_drop):
-        """Drop specified columns from the dataframe"""
-        dropped_columns = []
-        
-        for col in columns_to_drop:
-            if col in df.columns:
-                df = df.drop(columns=[col])
-                dropped_columns.append(col)
-                self.cleaning_history.append(f"Dropped column: {col}")
-        
-        return df, dropped_columns
-    
-    def rename_columns(self, df, rename_mapping):
-        """Rename columns according to the mapping"""
-        renamed_columns = {}
-        
-        for old_name, new_name in rename_mapping.items():
-            if old_name in df.columns:
-                df = df.rename(columns={old_name: new_name})
-                renamed_columns[old_name] = new_name
-                self.column_mappings[old_name] = new_name
-                self.cleaning_history.append(f"Renamed column: {old_name} -> {new_name}")
-        
-        return df, renamed_columns
+        return outliers_info
     
     def handle_missing_values(self, df, strategies):
-        """
-        Handle missing values according to specified strategies
-        
-        strategies: dict with column names as keys and strategy as values
-        Possible strategies: 'drop', 'mean', 'median', 'mode', 'forward_fill', 'backward_fill', 'custom_value'
-        """
+        """Handle missing values based on specified strategies"""
         handled_columns = {}
         
         for col, strategy_info in strategies.items():
             if col not in df.columns:
                 continue
-                
+            
             strategy = strategy_info.get('method', 'drop')
             custom_value = strategy_info.get('value', None)
             
@@ -154,210 +332,88 @@ class DataCleaner:
         return df, handled_columns
     
     def encode_categorical_data(self, df, encoding_strategies):
-        """
-        Encode categorical columns
-        
-        encoding_strategies: dict with column names as keys and encoding type as values
-        Possible encodings: 'label', 'onehot'
-        """
+        """Encode categorical columns"""
         encoded_columns = {}
         
-        for col, encoding_type in encoding_strategies.items():
-            if col not in df.columns:
+        for col, strategy in encoding_strategies.items():
+            if col not in df.columns or df[col].dtype != 'object':
                 continue
+            
+            if strategy == 'label':
+                le = LabelEncoder()
+                df[col] = le.fit_transform(df[col].astype(str))
+                self.encoders[col] = le
+                encoded_columns[col] = f"Label encoded with {len(le.classes_)} categories"
                 
-            if df[col].dtype == 'object':
-                if encoding_type == 'label':
-                    le = LabelEncoder()
-                    df[col] = le.fit_transform(df[col].astype(str))
-                    self.encoding_mappings[col] = le
-                    encoded_columns[col] = f"Label encoded (classes: {len(le.classes_)})"
-                    
-                elif encoding_type == 'onehot':
-                    # One-hot encoding
-                    dummies = pd.get_dummies(df[col], prefix=col)
-                    df = df.drop(columns=[col])
-                    df = pd.concat([df, dummies], axis=1)
-                    encoded_columns[col] = f"One-hot encoded ({len(dummies.columns)} new columns)"
-                
-                self.cleaning_history.append(f"Encoded {col}: {encoded_columns.get(col, 'No encoding applied')}")
+            elif strategy == 'onehot':
+                dummies = pd.get_dummies(df[col], prefix=col)
+                df = df.drop(columns=[col])
+                df = pd.concat([df, dummies], axis=1)
+                encoded_columns[col] = f"One-hot encoded into {len(dummies.columns)} columns"
+            
+            self.cleaning_history.append(f"Encoded {col}: {encoded_columns.get(col, 'No encoding applied')}")
         
         return df, encoded_columns
     
-    def detect_outliers(self, df, method='iqr', threshold=1.5):
-        """
-        Detect outliers in numerical columns
-        
-        method: 'iqr', 'zscore', 'isolation_forest'
-        threshold: threshold value for outlier detection
-        """
-        outliers_info = {}
-        numerical_cols = df.select_dtypes(include=[np.number]).columns
-        
-        for col in numerical_cols:
-            outliers = []
-            
-            if method == 'iqr':
-                Q1 = df[col].quantile(0.25)
-                Q3 = df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - threshold * IQR
-                upper_bound = Q3 + threshold * IQR
-                outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)].index.tolist()
-                
-            elif method == 'zscore':
-                z_scores = np.abs((df[col] - df[col].mean()) / df[col].std())
-                outliers = df[z_scores > threshold].index.tolist()
-            
-            outliers_info[col] = {
-                'count': len(outliers),
-                'indices': outliers,
-                'percentage': len(outliers) / len(df) * 100
-            }
-        
-        return outliers_info
-    
-    def remove_outliers(self, df, outlier_indices):
-        """Remove rows with outliers"""
-        original_shape = df.shape
-        df_cleaned = df.drop(index=outlier_indices)
-        removed_count = original_shape[0] - df_cleaned.shape[0]
-        
-        self.cleaning_history.append(f"Removed {removed_count} outlier rows")
-        
-        return df_cleaned, removed_count
-    
-    def apply_transformations(self, df, transformations):
-        """
-        Apply mathematical transformations to numerical columns
-        
-        transformations: dict with column names as keys and transformation type as values
-        Possible transformations: 'log', 'sqrt', 'square', 'reciprocal', 'normalize'
-        """
-        transformed_columns = {}
-        
-        for col, transform_type in transformations.items():
-            if col not in df.columns or df[col].dtype not in ['int64', 'float64']:
-                continue
-            
-            original_col = df[col].copy()
-            
-            try:
-                if transform_type == 'log':
-                    # Handle negative values by adding offset
-                    min_val = df[col].min()
-                    if min_val <= 0:
-                        offset = abs(min_val) + 1
-                        df[col] = np.log(df[col] + offset)
-                    else:
-                        df[col] = np.log(df[col])
-                    transformed_columns[col] = "Applied log transformation"
-                    
-                elif transform_type == 'sqrt':
-                    df[col] = np.sqrt(np.abs(df[col]))
-                    transformed_columns[col] = "Applied square root transformation"
-                    
-                elif transform_type == 'square':
-                    df[col] = df[col] ** 2
-                    transformed_columns[col] = "Applied square transformation"
-                    
-                elif transform_type == 'reciprocal':
-                    df[col] = 1 / df[col].replace(0, np.nan)
-                    transformed_columns[col] = "Applied reciprocal transformation"
-                    
-                elif transform_type == 'normalize':
-                    df[col] = (df[col] - df[col].min()) / (df[col].max() - df[col].min())
-                    transformed_columns[col] = "Applied min-max normalization"
-                
-                self.cleaning_history.append(f"Transformed {col}: {transformed_columns[col]}")
-                
-            except Exception as e:
-                df[col] = original_col  # Restore original if transformation fails
-                transformed_columns[col] = f"Transformation failed: {str(e)}"
-        
-        return df, transformed_columns
-    
-    def get_cleaning_summary(self):
-        """Get summary of all cleaning operations performed"""
-        return {
-            'operations_count': len(self.cleaning_history),
-            'operations': self.cleaning_history,
-            'column_mappings': self.column_mappings,
-            'encoding_mappings': {k: v.classes_.tolist() if hasattr(v, 'classes_') else str(v) 
-                                for k, v in self.encoding_mappings.items()}
-        }
-    
-    def save_cleaned_data(self, df, output_path):
-        """Save the cleaned dataframe to a CSV file"""
-        try:
-            df.to_csv(output_path, index=False)
-            self.cleaning_history.append(f"Saved cleaned data to {output_path}")
-            return True
-        except Exception as e:
-            return False, str(e)
-    
-    def validate_data_quality(self, df):
-        """Perform data quality validation"""
-        quality_report = {
-            'total_rows': len(df),
-            'total_columns': len(df.columns),
-            'missing_values': df.isnull().sum().sum(),
-            'duplicate_rows': df.duplicated().sum(),
-            'data_types': df.dtypes.value_counts().to_dict(),
-            'memory_usage_mb': df.memory_usage(deep=True).sum() / 1024 / 1024,
+    def validate_dataset(self, df, target_column=None):
+        """Validate dataset for regression training"""
+        validation_results = {
+            'is_valid': True,
+            'errors': [],
+            'warnings': [],
+            'recommendations': []
         }
         
-        # Check for potential issues
-        issues = []
+        # Check if dataframe is empty
+        if df.empty:
+            validation_results['is_valid'] = False
+            validation_results['errors'].append("Dataset is empty")
+            return validation_results
         
-        # High missing value percentage
-        missing_pct = (df.isnull().sum() / len(df) * 100)
-        high_missing_cols = missing_pct[missing_pct > 30].index.tolist()
-        if high_missing_cols:
-            issues.append(f"High missing values (>30%) in columns: {high_missing_cols}")
+        # Check target column
+        if target_column and target_column not in df.columns:
+            validation_results['is_valid'] = False
+            validation_results['errors'].append(f"Target column '{target_column}' not found")
+        
+        # Check for sufficient data
+        if len(df) < 10:
+            validation_results['is_valid'] = False
+            validation_results['errors'].append("Insufficient data (less than 10 rows)")
+        
+        # Check for features
+        feature_cols = [col for col in df.columns if col != target_column] if target_column else df.columns[:-1]
+        if len(feature_cols) == 0:
+            validation_results['is_valid'] = False
+            validation_results['errors'].append("No feature columns found")
+        
+        # Check data types
+        non_numeric_cols = df[feature_cols].select_dtypes(exclude=[np.number]).columns.tolist()
+        if non_numeric_cols:
+            validation_results['warnings'].append(f"Non-numeric columns detected: {non_numeric_cols}")
+            validation_results['recommendations'].append("Consider encoding categorical variables")
+        
+        # Check for missing values
+        missing_cols = df.columns[df.isnull().any()].tolist()
+        if missing_cols:
+            validation_results['warnings'].append(f"Missing values in columns: {missing_cols}")
+            validation_results['recommendations'].append("Handle missing values before training")
         
         # Check for constant columns
-        constant_cols = [col for col in df.columns if df[col].nunique() <= 1]
+        constant_cols = [col for col in feature_cols if df[col].nunique() <= 1]
         if constant_cols:
-            issues.append(f"Constant/single-value columns: {constant_cols}")
+            validation_results['warnings'].append(f"Constant columns detected: {constant_cols}")
+            validation_results['recommendations'].append("Remove constant columns")
         
-        # Check for highly correlated numerical columns
-        numerical_cols = df.select_dtypes(include=[np.number]).columns
-        if len(numerical_cols) > 1:
-            corr_matrix = df[numerical_cols].corr().abs()
-            high_corr_pairs = []
-            
-            for i in range(len(corr_matrix.columns)):
-                for j in range(i+1, len(corr_matrix.columns)):
-                    if corr_matrix.iloc[i, j] > 0.95:
-                        high_corr_pairs.append((corr_matrix.columns[i], corr_matrix.columns[j]))
-            
-            if high_corr_pairs:
-                issues.append(f"Highly correlated columns (>0.95): {high_corr_pairs}")
+        # Check target variable for regression
+        if target_column:
+            target_series = df[target_column]
+            if target_series.dtype == 'object':
+                validation_results['warnings'].append("Target variable is categorical")
+                validation_results['recommendations'].append("Ensure target encoding for regression tasks")
+            elif target_series.nunique() < 3:
+                validation_results['warnings'].append("Target variable has very few unique values")
         
-        quality_report['potential_issues'] = issues
-        quality_report['quality_score'] = self._calculate_quality_score(df)
-        
-        return quality_report
-    
-    def _calculate_quality_score(self, df):
-        """Calculate an overall data quality score (0-100)"""
-        score = 100
-        
-        # Deduct for missing values
-        missing_pct = df.isnull().sum().sum() / (len(df) * len(df.columns)) * 100
-        score -= missing_pct * 0.5
-        
-        # Deduct for duplicates
-        duplicate_pct = df.duplicated().sum() / len(df) * 100
-        score -= duplicate_pct * 0.3
-        
-        # Deduct for constant columns
-        constant_cols = [col for col in df.columns if df[col].nunique() <= 1]
-        if constant_cols:
-            score -= len(constant_cols) / len(df.columns) * 20
-        
-        return max(0, min(100, score))
+        return validation_results
 
 class DataValidator:
     """Validate data before training"""
