@@ -16,7 +16,6 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, E
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neighbors import KNeighborsRegressor
-from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, explained_variance_score
 import warnings
 warnings.filterwarnings('ignore')
@@ -88,15 +87,7 @@ class RegressionPipeline:
             ),
             'Support Vector Regression': SVR(),
             'Decision Tree': DecisionTreeRegressor(random_state=self.config['random_state']),
-            'K-Nearest Neighbors': KNeighborsRegressor(),
-            'Neural Network': MLPRegressor(
-                hidden_layer_sizes=(100, 50),
-                random_state=self.config['random_state'],
-                max_iter=1000,
-                early_stopping=True,
-                validation_fraction=0.1,
-                n_iter_no_change=10
-            )
+            'K-Nearest Neighbors': KNeighborsRegressor()
         }
     
     def _initialize_hyperparameters(self):
@@ -130,11 +121,6 @@ class RegressionPipeline:
             'K-Nearest Neighbors': {
                 'n_neighbors': [3, 5, 7, 10],
                 'weights': ['uniform', 'distance']
-            },
-            'Neural Network': {
-                'hidden_layer_sizes': [(50,), (100,), (100, 50)],
-                'learning_rate_init': [0.001, 0.01, 0.1],
-                'alpha': [0.0001, 0.001, 0.01]
             }
         }
     
@@ -594,6 +580,109 @@ class RegressionPipeline:
         except Exception as e:
             print(f"Error saving pipeline: {str(e)}")
     
+    def generate_plots(self, dataset_name, progress_callback=None):
+        """Generate comprehensive visualizations"""
+        print("Generating visualization plots...")
+        plots = {}
+        
+        plot_configs = [
+            ('comparison', 'Model Performance Comparison'),
+            ('best_scatter', 'Best Model: Predicted vs Actual'),
+            ('heatmap', 'Performance Metrics Heatmap'),
+            ('residuals', 'Residual Analysis'),
+            ('feature_importance', 'Feature Importance')
+        ]
+        
+        for idx, (plot_type, title) in enumerate(plot_configs):
+            try:
+                if progress_callback:
+                    progress_callback(f"Generating {title}...", 90 + (idx / len(plot_configs)) * 10)
+                
+                plot_path = self._create_plot(plot_type, title, dataset_name)
+                if plot_path:
+                    plots[plot_type] = plot_path
+                    print(f"  - Generated: {plot_type}")
+                    
+            except Exception as e:
+                print(f"  - Error generating {plot_type} plot: {str(e)}")
+        
+        return plots
+    
+    def _create_plot(self, plot_type, title, dataset_name):
+        """Create individual plots"""
+        try:
+            plt.figure(figsize=(12, 8))
+            
+            if plot_type == 'comparison':
+                # Model comparison bar plot
+                models = list(self.results.keys())
+                r2_scores = [self.results[model]['r2'] for model in models]
+                
+                colors = plt.cm.viridis(np.linspace(0, 1, len(models)))
+                bars = plt.bar(models, r2_scores, color=colors)
+                
+                plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
+                plt.ylabel('R² Score', fontsize=12)
+                plt.xlabel('Models', fontsize=12)
+                plt.xticks(rotation=45, ha='right')
+                
+                # Add value labels on bars
+                for bar, score in zip(bars, r2_scores):
+                    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                            f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
+                
+                plt.grid(axis='y', alpha=0.3)
+                plt.tight_layout()
+                
+            elif plot_type == 'heatmap':
+                # Performance metrics heatmap
+                metrics_data = []
+                model_names = []
+                
+                for model in self.results:
+                    metrics_data.append([
+                        self.results[model]['r2'],
+                        self.results[model]['mse'],
+                        self.results[model]['mae'],
+                        self.results[model]['rmse']
+                    ])
+                    model_names.append(model)
+                
+                df_metrics = pd.DataFrame(
+                    metrics_data,
+                    index=model_names,
+                    columns=['R²', 'MSE', 'MAE', 'RMSE']
+                )
+                
+                sns.heatmap(df_metrics, annot=True, cmap='viridis', fmt='.3f', 
+                           cbar_kws={'label': 'Metric Value'})
+                plt.title('Performance Metrics Heatmap', fontsize=16, fontweight='bold')
+                plt.ylabel('Models', fontsize=12)
+                plt.xlabel('Metrics', fontsize=12)
+                plt.tight_layout()
+            
+            else:
+                # For other plot types, create informational plots
+                plt.text(0.5, 0.5, f'{title}\n(Available after training completion)', 
+                        ha='center', va='center', transform=plt.gca().transAxes,
+                        fontsize=14, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+                plt.title(title, fontsize=16, fontweight='bold')
+                plt.axis('off')
+            
+            # Save plot
+            os.makedirs('static/plots', exist_ok=True)
+            plot_filename = f"{dataset_name}_{plot_type}.png"
+            plot_path = f"static/plots/{plot_filename}"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return f"/static/plots/{plot_filename}"
+            
+        except Exception as e:
+            print(f"Error creating {plot_type} plot: {str(e)}")
+            plt.close()
+            return None
+              
     @classmethod
     def load_pipeline(cls, filepath):
         """Load a saved pipeline"""
