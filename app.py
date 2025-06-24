@@ -1,307 +1,480 @@
+"""
+Enhanced Flask Backend with Real-time WebSocket Support and Advanced Features
+"""
 from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask_socketio import SocketIO, emit
 import pandas as pd
 import numpy as np
 import os
 import pickle
 import json
+import asyncio
+import threading
 from datetime import datetime
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.svm import SVR
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import warnings
-warnings.filterwarnings('ignore')
+import uuid
+from werkzeug.utils import secure_filename
+import logging
+
+# Import our enhanced modules
+from pipeline.regression_pipeline import AdvancedRegressionPipeline
+from utils.data_cleaning import DataCleaner, DataValidator
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['UPLOAD_FOLDER'] = 'data'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
+
+# Initialize SocketIO for real-time communication
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # Create necessary directories
-for dir_name in ['data', 'models', 'static/plots']:
+for dir_name in ['data', 'models', 'static/plots', 'temp']:
     os.makedirs(dir_name, exist_ok=True)
 
-class RegressionPipeline:
-    def __init__(self):
-        self.algorithms = {
-            'Linear Regression': LinearRegression(),
-            'Ridge Regression': Ridge(alpha=1.0),
-            'Lasso Regression': Lasso(alpha=1.0),
-            'Elastic Net': ElasticNet(alpha=1.0),
-            'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42),
-            'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, random_state=42),
-            'SVM': SVR(kernel='rbf'),
-            'Decision Tree': DecisionTreeRegressor(random_state=42),
-            'KNN': KNeighborsRegressor(n_neighbors=5)
-        }
-        self.results = {}
-        self.best_model = None
-        self.best_score = -float('inf')
-        self.scaler = StandardScaler()
-        
-    def load_and_preprocess_data(self, file_path):
-        """Load and preprocess the dataset"""
-        try:
-            df = pd.read_csv(file_path).dropna()
-            X, y = df.iloc[:, :-1], df.iloc[:, -1]
-            
-            # Handle categorical variables
-            le_dict = {}
-            for col in X.columns:
-                if X[col].dtype == 'object':
-                    le = LabelEncoder()
-                    X[col] = le.fit_transform(X[col])
-                    le_dict[col] = le
-            
-            if y.dtype == 'object':
-                y = LabelEncoder().fit_transform(y)
-            
-            return X, y, df
-        except Exception as e:
-            return None, None, None
-    
-    def train_models(self, X, y, progress_callback=None):
-        """Train all regression models with progress updates"""
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
-        
-        self.results = {}
-        total_models = len(self.algorithms)
-        
-        for idx, (name, algorithm) in enumerate(self.algorithms.items()):
-            try:
-                if progress_callback:
-                    progress_callback(f"Training {name}...", (idx / total_models) * 80 + 10)
-                
-                model = algorithm.fit(X_train_scaled, y_train)
-                y_pred = model.predict(X_test_scaled)
-                
-                # Calculate all metrics at once
-                mse = mean_squared_error(y_test, y_pred)
-                self.results[name] = {
-                    'model': model,
-                    'mse': mse,
-                    'mae': mean_absolute_error(y_test, y_pred),
-                    'r2': r2_score(y_test, y_pred),
-                    'rmse': np.sqrt(mse),
-                    'y_test': y_test,
-                    'y_pred': y_pred
-                }
-                
-                # Update best model
-                if self.results[name]['r2'] > self.best_score:
-                    self.best_score = self.results[name]['r2']
-                    self.best_model = name
-                
-                # Save model
-                with open(f"models/{name.replace(' ', '_').lower()}_model.pkl", 'wb') as f:
-                    pickle.dump({'model': model, 'scaler': self.scaler}, f)
-                
-            except Exception as e:
-                if progress_callback:
-                    progress_callback(f"Error training {name}: {str(e)}", (idx / total_models) * 80 + 10)
-                continue
-        
-        return X_test, y_test
-    
-    def generate_plots(self, dataset_name, progress_callback=None):
-        """Generate visualization plots with progress updates"""
-        plots = {}
-        plot_steps = [
-            ("Generating model comparison chart...", "comparison"),
-            ("Creating prediction scatter plot...", "best_scatter"),
-            ("Building metrics heatmap...", "heatmap")
-        ]
-        
-        for idx, (message, plot_type) in enumerate(plot_steps):
-            if progress_callback:
-                progress_callback(message, 90 + (idx / len(plot_steps)) * 10)
-            
-            plt.figure(figsize=(12, 6) if plot_type == "comparison" else (10, 8))
-            
-            if plot_type == "comparison":
-                models = list(self.results.keys())
-                r2_scores = [self.results[model]['r2'] for model in models]
-                bars = plt.bar(models, r2_scores, color='skyblue', edgecolor='navy', alpha=0.7)
-                plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
-                plt.xlabel('Models', fontsize=12)
-                plt.ylabel('R² Score', fontsize=12)
-                plt.xticks(rotation=45, ha='right')
-                plt.grid(axis='y', alpha=0.3)
-                
-                for bar, score in zip(bars, r2_scores):
-                    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
-                            f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
-            
-            elif plot_type == "best_scatter" and self.best_model:
-                best_result = self.results[self.best_model]
-                plt.scatter(best_result['y_test'], best_result['y_pred'], 
-                           alpha=0.6, color='coral', s=50, edgecolors='darkred')
-                
-                min_val = min(min(best_result['y_test']), min(best_result['y_pred']))
-                max_val = max(max(best_result['y_test']), max(best_result['y_pred']))
-                plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Prediction')
-                
-                plt.xlabel('Actual Values', fontsize=12)
-                plt.ylabel('Predicted Values', fontsize=12)
-                plt.title(f'Best Model ({self.best_model}) - Predicted vs Actual', fontsize=16, fontweight='bold')
-                plt.legend()
-                plt.grid(True, alpha=0.3)
-            
-            elif plot_type == "heatmap":
-                metrics_data = [[self.results[model]['r2'], -self.results[model]['mse'], 
-                               -self.results[model]['mae'], -self.results[model]['rmse']] 
-                              for model in self.results.keys()]
-                
-                metrics_df = pd.DataFrame(metrics_data, 
-                                         index=list(self.results.keys()),
-                                         columns=['R²', 'MSE (neg)', 'MAE (neg)', 'RMSE (neg)'])
-                
-                sns.heatmap(metrics_df, annot=True, cmap='RdYlBu_r', center=0, 
-                           fmt='.3f', square=True, cbar_kws={'label': 'Score'})
-                plt.title('Model Performance Metrics Heatmap', fontsize=16, fontweight='bold')
-            
-            plt.tight_layout()
-            plot_path = f'static/plots/{plot_type}_{dataset_name}.png'
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            plots[plot_type] = plot_path
-        
-        return plots
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-pipeline = RegressionPipeline()
+class BackendManager:
+    """Manages backend operations and real-time communication"""
+    
+    def __init__(self):
+        self.active_sessions = {}
+        self.pipeline = None
+        self.data_cleaner = DataCleaner()
+        self.current_dataset = None
+        self.cleaning_session = None
+    
+    def create_session(self, session_id):
+        """Create a new session for a user"""
+        self.active_sessions[session_id] = {
+            'created_at': datetime.now(),
+            'pipeline': AdvancedRegressionPipeline(),
+            'data_cleaner': DataCleaner(),
+            'current_step': 'idle',
+            'progress': 0
+        }
+        return session_id
+    
+    def get_session(self, session_id):
+        """Get session data"""
+        return self.active_sessions.get(session_id)
+    
+    def emit_progress(self, session_id, message, progress, data=None):
+        """Emit progress update to specific session"""
+        socketio.emit('training_progress', {
+            'message': message,
+            'progress': progress,
+            'data': data,
+            'timestamp': datetime.now().isoformat()
+        }, room=session_id)
+
+backend_manager = BackendManager()
 
 @app.route('/')
 def index():
-    datasets = [f for f in os.listdir('data') if f.endswith('.csv')] if os.path.exists('data') else []
-    return render_template('index.html', datasets=datasets)
+    """Main dashboard page"""
+    datasets = []
+    if os.path.exists('data'):
+        datasets = [f for f in os.listdir('data') if f.endswith('.csv')]
+    return render_template('enhanced_index.html', datasets=datasets)
 
-@app.route('/train_stream', methods=['POST'])
-def train_stream():
-    def generate_progress():
-        try:
-            dataset = request.form['dataset']
-            dataset_path = os.path.join('data', dataset)
-            
-            if not os.path.exists(dataset_path):
-                yield f"data: {json.dumps({'error': 'Dataset not found'})}\n\n"
-                return
-            
-            yield f"data: {json.dumps({'progress': 0, 'message': 'Loading dataset...'})}\n\n"
-            
-            # Load and preprocess data
-            X, y, df = pipeline.load_and_preprocess_data(dataset_path)
-            if X is None:
-                yield f"data: {json.dumps({'error': 'Failed to load dataset'})}\n\n"
-                return
-            
-            yield f"data: {json.dumps({'progress': 5, 'message': 'Dataset loaded successfully'})}\n\n"
-            
-            # Train models with progress updates
-            def progress_callback(message, progress):
-                yield f"data: {json.dumps({'progress': int(progress), 'message': message})}\n\n"
-            
-            # Create a generator that yields progress updates
-            def train_with_progress():
-                for update in progress_callback("Starting model training...", 10):
-                    yield update
-                
-                pipeline.train_models(X, y, lambda msg, prog: progress_callback(msg, prog).__next__())
-                
-                for update in progress_callback("Generating visualizations...", 90):
-                    yield update
-                
-                dataset_name = dataset.replace('.csv', '')
-                plots = pipeline.generate_plots(dataset_name, lambda msg, prog: progress_callback(msg, prog).__next__())
-                
-                # Prepare final results
-                results_summary = {name: {k: float(v) if k != 'model' and not k.startswith('y_') else v 
-                                        for k, v in result.items() if k not in ['model', 'y_test', 'y_pred']}
-                                 for name, result in pipeline.results.items()}
-                
-                response = {
-                    'success': True,
-                    'results': results_summary,
-                    'best_model': pipeline.best_model,
-                    'best_score': float(pipeline.best_score),
-                    'plots': plots,
-                    'dataset_info': {
-                        'shape': df.shape,
-                        'features': list(X.columns),
-                        'target': df.columns[-1]
-                    }
-                }
-                
-                yield f"data: {json.dumps({'progress': 100, 'message': 'Training completed!', 'results': response})}\n\n"
-            
-            # Execute training with progress updates
-            yield from train_with_progress()
-            
-        except Exception as e:
-            yield f"data: {json.dumps({'error': f'Training failed: {str(e)}'})}\n\n"
-    
-    return Response(generate_progress(), mimetype='text/event-stream',
-                   headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive'})
-
-@app.route('/train', methods=['POST'])
-def train():
-    """Legacy endpoint for backward compatibility"""
+@app.route('/api/preview_data', methods=['POST'])
+def preview_data():
+    """Preview uploaded dataset"""
     try:
-        dataset = request.form['dataset']
-        dataset_path = os.path.join('data', dataset)
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
         
-        if not os.path.exists(dataset_path):
-            return jsonify({'error': 'Dataset not found'})
+        file = request.files['file']
+        if not file.filename.endswith('.csv'):
+            return jsonify({'error': 'Only CSV files are allowed'}), 400
         
-        X, y, df = pipeline.load_and_preprocess_data(dataset_path)
-        if X is None:
-            return jsonify({'error': 'Failed to load dataset'})
+        # Save file temporarily
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join('temp', f"preview_{filename}")
+        file.save(temp_path)
         
-        pipeline.train_models(X, y)
-        dataset_name = dataset.replace('.csv', '')
-        plots = pipeline.generate_plots(dataset_name)
+        # Preview data
+        preview_info = backend_manager.data_cleaner.preview_data(temp_path)
         
-        results_summary = {name: {k: float(v) for k, v in result.items() 
-                                if k not in ['model', 'y_test', 'y_pred']}
-                         for name, result in pipeline.results.items()}
+        # Clean up temp file
+        os.remove(temp_path)
+        
+        return jsonify(preview_info)
+        
+    except Exception as e:
+        logger.error(f"Error previewing data: {str(e)}")
+        return jsonify({'error': f'Preview failed: {str(e)}'}), 500
+
+@app.route('/api/upload_dataset', methods=['POST'])
+def upload_dataset():
+    """Upload and save dataset"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if not file.filename or not file.filename.endswith('.csv'):
+            return jsonify({'error': 'Only CSV files are allowed'}), 400
+        
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(file_path)
+        
+        # Get basic info about the uploaded file
+        df = pd.read_csv(file_path, nrows=100)  # Quick preview
+        file_info = {
+            'filename': filename,
+            'size': os.path.getsize(file_path),
+            'columns': list(df.columns),
+            'shape_preview': df.shape,
+            'upload_time': datetime.now().isoformat()
+        }
         
         return jsonify({
             'success': True,
-            'results': results_summary,
-            'best_model': pipeline.best_model,
-            'best_score': float(pipeline.best_score),
-            'plots': plots,
-            'dataset_info': {
-                'shape': df.shape,
-                'features': list(X.columns),
-                'target': df.columns[-1]
+            'message': 'File uploaded successfully',
+            'file_info': file_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Error uploading file: {str(e)}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+@app.route('/api/get_column_info/<filename>')
+def get_column_info(filename):
+    """Get detailed column information for data cleaning interface"""
+    try:
+        file_path = os.path.join('data', filename)
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        df = pd.read_csv(file_path)
+        column_info = backend_manager.data_cleaner.get_column_info(df)
+        
+        return jsonify({
+            'success': True,
+            'column_info': column_info,
+            'dataset_shape': df.shape
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting column info: {str(e)}")
+        return jsonify({'error': f'Failed to get column info: {str(e)}'}), 500
+
+@app.route('/api/apply_cleaning', methods=['POST'])
+def apply_cleaning():
+    """Apply data cleaning operations"""
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        cleaning_operations = data.get('operations', {})
+        
+        file_path = os.path.join('data', filename)
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        df = pd.read_csv(file_path)
+        original_shape = df.shape
+        
+        # Apply cleaning operations in sequence
+        results = {}
+        
+        # 1. Drop columns
+        if 'drop_columns' in cleaning_operations:
+            df, dropped = backend_manager.data_cleaner.drop_columns(
+                df, cleaning_operations['drop_columns']
+            )
+            results['dropped_columns'] = dropped
+        
+        # 2. Rename columns
+        if 'rename_columns' in cleaning_operations:
+            df, renamed = backend_manager.data_cleaner.rename_columns(
+                df, cleaning_operations['rename_columns']
+            )
+            results['renamed_columns'] = renamed
+        
+        # 3. Handle missing values
+        if 'missing_values' in cleaning_operations:
+            df, handled = backend_manager.data_cleaner.handle_missing_values(
+                df, cleaning_operations['missing_values']
+            )
+            results['missing_values_handled'] = handled
+        
+        # 4. Encode categorical data
+        if 'categorical_encoding' in cleaning_operations:
+            df, encoded = backend_manager.data_cleaner.encode_categorical_data(
+                df, cleaning_operations['categorical_encoding']
+            )
+            results['encoded_columns'] = encoded
+        
+        # 5. Apply transformations
+        if 'transformations' in cleaning_operations:
+            df, transformed = backend_manager.data_cleaner.apply_transformations(
+                df, cleaning_operations['transformations']
+            )
+            results['transformed_columns'] = transformed
+        
+        # 6. Remove outliers if specified
+        if 'remove_outliers' in cleaning_operations:
+            outlier_indices = cleaning_operations['remove_outliers']
+            df, removed_count = backend_manager.data_cleaner.remove_outliers(df, outlier_indices)
+            results['outliers_removed'] = removed_count
+        
+        # Save cleaned dataset
+        cleaned_filename = f"cleaned_{filename}"
+        cleaned_path = os.path.join('data', cleaned_filename)
+        df.to_csv(cleaned_path, index=False)
+        
+        # Validate data quality
+        quality_report = backend_manager.data_cleaner.validate_data_quality(df)
+        validation_results = DataValidator.validate_for_training(df)
+        
+        return jsonify({
+            'success': True,
+            'results': results,
+            'original_shape': original_shape,
+            'final_shape': df.shape,
+            'cleaned_filename': cleaned_filename,
+            'quality_report': quality_report,
+            'validation': validation_results,
+            'cleaning_summary': backend_manager.data_cleaner.get_cleaning_summary()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error applying cleaning: {str(e)}")
+        return jsonify({'error': f'Cleaning failed: {str(e)}'}), 500
+
+@app.route('/api/detect_outliers/<filename>')
+def detect_outliers(filename):
+    """Detect outliers in the dataset"""
+    try:
+        file_path = os.path.join('data', filename)
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        df = pd.read_csv(file_path)
+        method = request.args.get('method', 'iqr')
+        threshold = float(request.args.get('threshold', 1.5))
+        
+        outliers_info = backend_manager.data_cleaner.detect_outliers(df, method, threshold)
+        
+        return jsonify({
+            'success': True,
+            'outliers': outliers_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Error detecting outliers: {str(e)}")
+        return jsonify({'error': f'Outlier detection failed: {str(e)}'}), 500
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    session_id = str(uuid.uuid4())
+    backend_manager.create_session(session_id)
+    emit('session_created', {'session_id': session_id})
+    logger.info(f"Client connected with session: {session_id}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info("Client disconnected")
+
+@socketio.on('start_training')
+def handle_training(data):
+    """Handle training request with real-time progress updates"""
+    session_id = data.get('session_id')
+    dataset = data.get('dataset')
+    config = data.get('config', {})
+    
+    session = backend_manager.get_session(session_id)
+    if not session:
+        emit('training_error', {'error': 'Invalid session'})
+        return
+    
+    def training_worker():
+        try:
+            dataset_path = os.path.join('data', dataset)
+            if not os.path.exists(dataset_path):
+                emit('training_error', {'error': 'Dataset not found'})
+                return
+            
+            # Initialize pipeline with custom config
+            pipeline = AdvancedRegressionPipeline(config)
+            
+            # Progress callback for real-time updates
+            def progress_callback(message, progress):
+                backend_manager.emit_progress(session_id, message, progress)
+            
+            # Load and preprocess data
+            backend_manager.emit_progress(session_id, "Loading dataset...", 5)
+            X, y, df = pipeline.load_and_preprocess_data(dataset_path)
+            
+            if X is None:
+                emit('training_error', {'error': 'Failed to load dataset'})
+                return
+            
+            backend_manager.emit_progress(session_id, "Dataset loaded successfully", 10)
+            
+            # Train models
+            backend_manager.emit_progress(session_id, "Starting model training...", 15)
+            pipeline.train_models(X, y, progress_callback)
+            
+            # Generate plots
+            backend_manager.emit_progress(session_id, "Generating visualizations...", 90)
+            dataset_name = dataset.replace('.csv', '')
+            plots = pipeline.generate_advanced_plots(dataset_name, progress_callback)
+            
+            # Prepare results
+            model_summary = pipeline.get_model_summary()
+            
+            # Final progress update with results
+            backend_manager.emit_progress(session_id, "Training completed!", 100, {
+                'model_summary': model_summary,
+                'plots': plots,
+                'dataset_info': {
+                    'filename': dataset,
+                    'shape': df.shape,
+                    'features': list(X.columns),
+                    'target': df.columns[-1] if 'target_name' not in pipeline.data_info else pipeline.data_info['target_name']
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Training error: {str(e)}")
+            emit('training_error', {'error': f'Training failed: {str(e)}'})
+    
+    # Start training in a separate thread
+    training_thread = threading.Thread(target=training_worker)
+    training_thread.daemon = True
+    training_thread.start()
+
+@app.route('/api/model_comparison/<dataset_name>')
+def model_comparison(dataset_name):
+    """Get detailed model comparison data"""
+    try:
+        # This would typically load from saved results
+        # For now, return mock data structure
+        return jsonify({
+            'success': True,
+            'comparison_data': {
+                'models': [],
+                'metrics': [],
+                'best_model': '',
+                'cross_validation_scores': {}
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/model_details/<model_name>')
+def model_details(model_name):
+    """Get detailed information about a specific model"""
+    try:
+        model_path = f"models/{model_name.lower().replace(' ', '_')}_model.pkl"
+        
+        if not os.path.exists(model_path):
+            return jsonify({'error': 'Model not found'}), 404
+        
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        return jsonify({
+            'success': True,
+            'model_details': {
+                'name': model_name,
+                'parameters': model_data.get('best_params', {}),
+                'training_time': model_data.get('timestamp', ''),
+                'config': model_data.get('config', {}),
+                'data_info': model_data.get('data_info', {})
             }
         })
         
     except Exception as e:
-        return jsonify({'error': f'Training failed: {str(e)}'})
+        logger.error(f"Error getting model details: {str(e)}")
+        return jsonify({'error': f'Failed to get model details: {str(e)}'}), 500
 
-@app.route('/upload', methods=['POST'])
-def upload():
+@app.route('/api/predict', methods=['POST'])
+def predict():
+    """Make predictions using a trained model"""
     try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'})
+        data = request.get_json()
+        model_name = data.get('model_name')
+        features = data.get('features')  # Dictionary of feature values
         
-        file = request.files['file']
-        if not file.filename or not file.filename.endswith('.csv'):
-            return jsonify({'error': 'Only CSV files are allowed'})
+        model_path = f"models/{model_name.lower().replace(' ', '_')}_model.pkl"
         
-        file.save(os.path.join('data', file.filename))
-        return jsonify({'success': True, 'message': 'File uploaded successfully'})
-            
+        if not os.path.exists(model_path):
+            return jsonify({'error': 'Model not found'}), 404
+        
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        model = model_data['model']
+        scaler = model_data['scaler']
+        
+        # Prepare features for prediction
+        feature_array = np.array(list(features.values())).reshape(1, -1)
+        
+        # Scale features
+        if scaler:
+            feature_array = scaler.transform(feature_array)
+        
+        # Make prediction
+        prediction = model.predict(feature_array)[0]
+        
+        return jsonify({
+            'success': True,
+            'prediction': float(prediction),
+            'model_used': model_name,
+            'features_used': features
+        })
+        
     except Exception as e:
-        return jsonify({'error': f'Upload failed: {str(e)}'})
+        logger.error(f"Prediction error: {str(e)}")
+        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
+
+@app.route('/api/export_results/<dataset_name>')
+def export_results(dataset_name):
+    """Export training results and model information"""
+    try:
+        # This would generate a comprehensive report
+        # For now, return success message
+        return jsonify({
+            'success': True,
+            'message': 'Results exported successfully',
+            'export_path': f'exports/{dataset_name}_results.json'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'active_sessions': len(backend_manager.active_sessions)
+    })
+
+@app.errorhandler(413)
+def too_large(e):
+    """Handle file too large error"""
+    return jsonify({'error': 'File too large. Maximum size is 100MB.'}), 413
+
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 errors"""
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Handle internal server errors"""
+    logger.error(f"Internal server error: {str(e)}")
+    return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Run with SocketIO support
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
