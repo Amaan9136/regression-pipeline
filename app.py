@@ -1,11 +1,10 @@
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
 import pandas as pd
 import numpy as np
 import os
 import pickle
 import json
-import asyncio
 import threading
 from datetime import datetime
 import uuid
@@ -16,7 +15,7 @@ from pipeline.regression_pipeline import RegressionPipeline
 from utils.data_cleaning import DataCleaner, DataValidator
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'
 app.config['UPLOAD_FOLDER'] = 'data'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 
@@ -36,10 +35,7 @@ class BackendManager:
     
     def __init__(self):
         self.active_sessions = {}
-        self.pipeline = None
         self.data_cleaner = DataCleaner()
-        self.current_dataset = None
-        self.cleaning_session = None
     
     def create_session(self, session_id):
         """Create a new session for a user"""
@@ -75,36 +71,8 @@ def index():
         datasets = [f for f in os.listdir('data') if f.endswith('.csv')]
     return render_template('index.html', datasets=datasets)
 
-@app.route('/api/preview_data', methods=['POST'])
-def preview_data():
-    """Preview uploaded dataset"""
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        file = request.files['file']
-        if not file.filename.endswith('.csv'):
-            return jsonify({'error': 'Only CSV files are allowed'}), 400
-        
-        # Save file temporarily
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join('temp', f"preview_{filename}")
-        file.save(temp_path)
-        
-        # Preview data
-        preview_info = backend_manager.data_cleaner.preview_data(temp_path)
-        
-        # Clean up temp file
-        os.remove(temp_path)
-        
-        return jsonify(preview_info)
-        
-    except Exception as e:
-        logger.error(f"Error previewing data: {str(e)}")
-        return jsonify({'error': f'Preview failed: {str(e)}'}), 500
-
-@app.route('/api/upload_dataset', methods=['POST'])
-def upload_dataset():
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
     """Upload and save dataset"""
     try:
         if 'file' not in request.files:
@@ -119,45 +87,65 @@ def upload_dataset():
         file.save(file_path)
         
         # Get basic info about the uploaded file
-        df = pd.read_csv(file_path, nrows=100)  # Quick preview
-        file_info = {
-            'filename': filename,
-            'size': os.path.getsize(file_path),
-            'columns': list(df.columns),
-            'shape_preview': df.shape,
-            'upload_time': datetime.now().isoformat()
-        }
+        df = pd.read_csv(file_path, nrows=5)  # Quick preview
         
         return jsonify({
             'success': True,
+            'filename': filename,
             'message': 'File uploaded successfully',
-            'file_info': file_info
+            'preview': {
+                'columns': list(df.columns),
+                'shape': [len(df), len(df.columns)],
+                'sample_data': df.head().to_dict('records')
+            }
         })
         
     except Exception as e:
         logger.error(f"Error uploading file: {str(e)}")
         return jsonify({'error': f'Upload failed: {str(e)}'}), 500
 
-@app.route('/api/get_column_info/<filename>')
-def get_column_info(filename):
-    """Get detailed column information for data cleaning interface"""
+@app.route('/api/dataset_info/<filename>')
+def get_dataset_info(filename):
+    """Get comprehensive dataset information"""
     try:
         file_path = os.path.join('data', filename)
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
         df = pd.read_csv(file_path)
+        
+        # Get column information
         column_info = backend_manager.data_cleaner.get_column_info(df)
+        
+        # Get data quality report
+        quality_report = backend_manager.data_cleaner.validate_data_quality(df)
+        
+        # Get missing values info
+        missing_info = {}
+        for col in df.columns:
+            missing_count = df[col].isnull().sum()
+            if missing_count > 0:
+                missing_info[col] = {
+                    'count': int(missing_count),
+                    'percentage': float(missing_count / len(df) * 100)
+                }
         
         return jsonify({
             'success': True,
-            'column_info': column_info,
-            'dataset_shape': df.shape
+            'dataset_info': {
+                'filename': filename,
+                'shape': df.shape,
+                'columns': column_info,
+                'missing_values': missing_info,
+                'quality_report': quality_report,
+                'dtypes': df.dtypes.to_dict(),
+                'memory_usage': float(df.memory_usage(deep=True).sum() / 1024 / 1024)  # MB
+            }
         })
         
     except Exception as e:
-        logger.error(f"Error getting column info: {str(e)}")
-        return jsonify({'error': f'Failed to get column info: {str(e)}'}), 500
+        logger.error(f"Error getting dataset info: {str(e)}")
+        return jsonify({'error': f'Failed to get dataset info: {str(e)}'}), 500
 
 @app.route('/api/apply_cleaning', methods=['POST'])
 def apply_cleaning():
@@ -265,6 +253,72 @@ def detect_outliers(filename):
         logger.error(f"Error detecting outliers: {str(e)}")
         return jsonify({'error': f'Outlier detection failed: {str(e)}'}), 500
 
+@app.route('/api/predict', methods=['POST'])
+def make_prediction():
+    """Make predictions using trained models"""
+    try:
+        data = request.get_json()
+        model_name = data.get('model_name')
+        features = data.get('features')
+        
+        if not model_name or not features:
+            return jsonify({'error': 'Model name and features are required'}), 400
+        
+        # Load model
+        model_file = f"models/{model_name.replace(' ', '_').lower()}_model.pkl"
+        
+        if not os.path.exists(model_file):
+            return jsonify({'error': 'Model not found'}), 404
+        
+        with open(model_file, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        model = model_data['model']
+        scaler = model_data.get('scaler')
+        
+        # Prepare features for prediction
+        feature_array = np.array(list(features.values())).reshape(1, -1)
+        
+        # Scale features if scaler exists
+        if scaler:
+            feature_array = scaler.transform(feature_array)
+        
+        # Make prediction
+        prediction = model.predict(feature_array)[0]
+        
+        return jsonify({
+            'success': True,
+            'prediction': float(prediction),
+            'model_used': model_name,
+            'features_used': features
+        })
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
+
+@app.route('/api/export_results/<dataset_name>')
+def export_results(dataset_name):
+    """Export training results and model information"""
+    try:
+        # Generate export data
+        export_data = {
+            'dataset_name': dataset_name,
+            'export_timestamp': datetime.now().isoformat(),
+            'results': 'Generated results would go here'
+        }
+        
+        return jsonify({
+            'success': True,
+            'message': 'Results exported successfully',
+            'export_data': export_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Export error: {str(e)}")
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+# WebSocket event handlers
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection"""
@@ -330,121 +384,17 @@ def handle_training(data):
             backend_manager.emit_progress(session_id, "Training completed!", 100, {
                 'model_summary': model_summary,
                 'plots': plots,
-                'dataset_info': {
-                    'filename': dataset,
-                    'shape': df.shape,
-                    'features': list(X.columns),
-                    'target': df.columns[-1] if 'target_name' not in pipeline.data_info else pipeline.data_info['target_name']
-                }
+                'dataset_info': pipeline.data_info
             })
             
         except Exception as e:
             logger.error(f"Training error: {str(e)}")
-            emit('training_error', {'error': f'Training failed: {str(e)}'})
+            emit('training_error', {'error': str(e)})
     
     # Start training in a separate thread
     training_thread = threading.Thread(target=training_worker)
     training_thread.daemon = True
     training_thread.start()
-
-@app.route('/api/model_comparison/<dataset_name>')
-def model_comparison(dataset_name):
-    """Get detailed model comparison data"""
-    try:
-        # This would typically load from saved results
-        # For now, return mock data structure
-        return jsonify({
-            'success': True,
-            'comparison_data': {
-                'models': [],
-                'metrics': [],
-                'best_model': '',
-                'cross_validation_scores': {}
-            }
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/model_details/<model_name>')
-def model_details(model_name):
-    """Get detailed information about a specific model"""
-    try:
-        model_path = f"models/{model_name.lower().replace(' ', '_')}_model.pkl"
-        
-        if not os.path.exists(model_path):
-            return jsonify({'error': 'Model not found'}), 404
-        
-        with open(model_path, 'rb') as f:
-            model_data = pickle.load(f)
-        
-        return jsonify({
-            'success': True,
-            'model_details': {
-                'name': model_name,
-                'parameters': model_data.get('best_params', {}),
-                'training_time': model_data.get('timestamp', ''),
-                'config': model_data.get('config', {}),
-                'data_info': model_data.get('data_info', {})
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting model details: {str(e)}")
-        return jsonify({'error': f'Failed to get model details: {str(e)}'}), 500
-
-@app.route('/api/predict', methods=['POST'])
-def predict():
-    """Make predictions using a trained model"""
-    try:
-        data = request.get_json()
-        model_name = data.get('model_name')
-        features = data.get('features')  # Dictionary of feature values
-        
-        model_path = f"models/{model_name.lower().replace(' ', '_')}_model.pkl"
-        
-        if not os.path.exists(model_path):
-            return jsonify({'error': 'Model not found'}), 404
-        
-        with open(model_path, 'rb') as f:
-            model_data = pickle.load(f)
-        
-        model = model_data['model']
-        scaler = model_data['scaler']
-        
-        # Prepare features for prediction
-        feature_array = np.array(list(features.values())).reshape(1, -1)
-        
-        # Scale features
-        if scaler:
-            feature_array = scaler.transform(feature_array)
-        
-        # Make prediction
-        prediction = model.predict(feature_array)[0]
-        
-        return jsonify({
-            'success': True,
-            'prediction': float(prediction),
-            'model_used': model_name,
-            'features_used': features
-        })
-        
-    except Exception as e:
-        logger.error(f"Prediction error: {str(e)}")
-        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
-
-@app.route('/api/export_results/<dataset_name>')
-def export_results(dataset_name):
-    """Export training results and model information"""
-    try:
-        # This would generate a comprehensive report
-        # For now, return success message
-        return jsonify({
-            'success': True,
-            'message': 'Results exported successfully',
-            'export_path': f'exports/{dataset_name}_results.json'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/health')
 def health_check():
