@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder, RobustScaler, MinMaxScaler
-from sklearn.feature_selection import SelectKBest, f_regression, RFE
+from sklearn.feature_selection import SelectKBest, f_regression
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor
 from sklearn.svm import SVR
@@ -18,8 +18,6 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, explained_variance_score
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -34,8 +32,10 @@ class RegressionPipeline:
         self.best_score = -float('inf')
         self.scaler = None
         self.feature_selector = None
-        self.preprocessing_steps = []
         self.trained_models = {}
+        self.data_info = {}
+        self.categorical_encoders = {}
+        self.target_encoder = None
         
     def _default_config(self):
         """Default configuration for the pipeline"""
@@ -57,13 +57,26 @@ class RegressionPipeline:
             'Ridge Regression': Ridge(random_state=self.config['random_state']),
             'Lasso Regression': Lasso(random_state=self.config['random_state']),
             'Elastic Net': ElasticNet(random_state=self.config['random_state']),
-            'Random Forest': RandomForestRegressor(random_state=self.config['random_state']),
-            'Extra Trees': ExtraTreesRegressor(random_state=self.config['random_state']),
-            'Gradient Boosting': GradientBoostingRegressor(random_state=self.config['random_state']),
-            'SVM': SVR(),
+            'Random Forest': RandomForestRegressor(
+                random_state=self.config['random_state'],
+                n_estimators=100
+            ),
+            'Extra Trees': ExtraTreesRegressor(
+                random_state=self.config['random_state'],
+                n_estimators=100
+            ),
+            'Gradient Boosting': GradientBoostingRegressor(
+                random_state=self.config['random_state'],
+                n_estimators=100
+            ),
+            'SVM': SVR(kernel='rbf'),
             'Decision Tree': DecisionTreeRegressor(random_state=self.config['random_state']),
-            'KNN': KNeighborsRegressor(),
-            'Neural Network': MLPRegressor(random_state=self.config['random_state'], max_iter=1000)
+            'KNN': KNeighborsRegressor(n_neighbors=5),
+            'Neural Network': MLPRegressor(
+                random_state=self.config['random_state'], 
+                max_iter=1000,
+                hidden_layer_sizes=(100,)
+            )
         }
     
     def _initialize_hyperparameters(self):
@@ -72,23 +85,41 @@ class RegressionPipeline:
             'Ridge Regression': {'alpha': [0.1, 1.0, 10.0, 100.0]},
             'Lasso Regression': {'alpha': [0.1, 1.0, 10.0, 100.0]},
             'Elastic Net': {'alpha': [0.1, 1.0, 10.0], 'l1_ratio': [0.1, 0.5, 0.9]},
-            'Random Forest': {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
-            'Extra Trees': {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
-            'Gradient Boosting': {'n_estimators': [50, 100, 200], 'learning_rate': [0.01, 0.1, 0.2]},
-            'SVM': {'C': [0.1, 1.0, 10.0], 'gamma': ['scale', 'auto']},
-            'Decision Tree': {'max_depth': [None, 5, 10, 20]},
-            'KNN': {'n_neighbors': [3, 5, 7, 9]},
-            'Neural Network': {'hidden_layer_sizes': [(50,), (100,), (50, 50)], 'alpha': [0.0001, 0.001]}
+            'Random Forest': {
+                'n_estimators': [50, 100, 200], 
+                'max_depth': [None, 10, 20],
+                'min_samples_split': [2, 5]
+            },
+            'Extra Trees': {
+                'n_estimators': [50, 100, 200], 
+                'max_depth': [None, 10, 20],
+                'min_samples_split': [2, 5]
+            },
+            'Gradient Boosting': {
+                'n_estimators': [50, 100, 200], 
+                'learning_rate': [0.01, 0.1, 0.2],
+                'max_depth': [3, 5, 7]
+            },
+            'SVM': {'C': [0.1, 1.0, 10.0], 'gamma': ['scale', 'auto'], 'epsilon': [0.1, 0.01]},
+            'Decision Tree': {'max_depth': [None, 5, 10, 20], 'min_samples_split': [2, 5, 10]},
+            'KNN': {'n_neighbors': [3, 5, 7, 9], 'weights': ['uniform', 'distance']},
+            'Neural Network': {
+                'hidden_layer_sizes': [(50,), (100,), (50, 50)], 
+                'alpha': [0.0001, 0.001, 0.01],
+                'learning_rate': ['constant', 'adaptive']
+            }
         }
 
     def load_and_preprocess_data(self, file_path, target_column=None):
         """Load and preprocess the dataset with feature engineering"""
         try:
             df = pd.read_csv(file_path)
+            print(f"Loaded dataset with shape: {df.shape}")
             
             # Handle missing values
             initial_shape = df.shape
             df = self._handle_missing_values(df)
+            print(f"After handling missing values: {df.shape}")
             
             # Separate features and target
             if target_column:
@@ -99,6 +130,8 @@ class RegressionPipeline:
             else:
                 # Assume last column is target
                 X, y = df.iloc[:, :-1], df.iloc[:, -1]
+            
+            print(f"Features shape: {X.shape}, Target shape: {y.shape}")
             
             # Store original data info
             self.data_info = {
@@ -111,39 +144,61 @@ class RegressionPipeline:
             
             # Feature engineering
             if self.config['feature_engineering']:
+                print("Applying feature engineering...")
                 X = self._engineer_features(X)
+                print(f"After feature engineering: {X.shape}")
                 
             # Handle categorical variables
             X, self.categorical_encoders = self._encode_categorical_variables(X)
+            print(f"After encoding: {X.shape}")
             
             # Handle target variable encoding if categorical
             if y.dtype == 'object':
+                print("Encoding categorical target variable...")
                 self.target_encoder = LabelEncoder()
-                y = self.target_encoder.fit_transform(y)
+                y = pd.Series(self.target_encoder.fit_transform(y), index=y.index)
             else:
                 self.target_encoder = None
             
+            # Final validation
+            if X.isnull().any().any() or y.isnull().any():
+                print("Warning: Still have missing values after preprocessing")
+                X = X.fillna(X.mean() if X.dtypes.name in ['int64', 'float64'] else X.mode().iloc[0])
+                y = y.fillna(y.mean() if y.dtype.name in ['int64', 'float64'] else y.mode().iloc[0])
+            
+            print(f"Final data shapes - X: {X.shape}, y: {y.shape}")
             return X, y, df
             
         except Exception as e:
+            print(f"Error in load_and_preprocess_data: {str(e)}")
             raise Exception(f"Error loading data: {str(e)}")
     
     def _handle_missing_values(self, df):
         """Handle missing values in the dataset"""
+        print("Handling missing values...")
+        
         # Record missing value statistics
         self.missing_stats = df.isnull().sum()
+        print(f"Missing values per column: {self.missing_stats[self.missing_stats > 0]}")
         
         # Drop rows with too many missing values (>50%)
         threshold = len(df.columns) * 0.5
+        initial_rows = len(df)
         df = df.dropna(thresh=threshold)
+        print(f"Dropped {initial_rows - len(df)} rows with >50% missing values")
         
         # Fill remaining missing values
         for col in df.columns:
             if df[col].isnull().any():
                 if df[col].dtype in ['int64', 'float64']:
-                    df[col].fillna(df[col].median(), inplace=True)
+                    fill_value = df[col].median()
+                    df[col].fillna(fill_value, inplace=True)
+                    print(f"Filled {col} with median: {fill_value}")
                 else:
-                    df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else 'Unknown', inplace=True)
+                    mode_values = df[col].mode()
+                    fill_value = mode_values[0] if not mode_values.empty else 'Unknown'
+                    df[col].fillna(fill_value, inplace=True)
+                    print(f"Filled {col} with mode: {fill_value}")
         
         return df
     
@@ -151,24 +206,39 @@ class RegressionPipeline:
         """Perform feature engineering"""
         X_engineered = X.copy()
         
-        # Create interaction features for numerical columns
+        # Get numerical columns
         numerical_cols = X_engineered.select_dtypes(include=[np.number]).columns
+        print(f"Found {len(numerical_cols)} numerical columns for feature engineering")
+        
         if len(numerical_cols) >= 2:
-            for i in range(min(3, len(numerical_cols))):  # Limit to avoid explosion
+            # Create interaction features for first few numerical columns
+            for i in range(min(3, len(numerical_cols))):
                 for j in range(i+1, min(3, len(numerical_cols))):
                     col1, col2 = numerical_cols[i], numerical_cols[j]
-                    X_engineered[f'{col1}_x_{col2}'] = X_engineered[col1] * X_engineered[col2]
+                    feature_name = f'{col1}_x_{col2}'
+                    X_engineered[feature_name] = X_engineered[col1] * X_engineered[col2]
+                    print(f"Created interaction feature: {feature_name}")
         
         # Create polynomial features for first few numerical columns
-        for col in numerical_cols[:3]:  # Limit to first 3 columns
+        for col in numerical_cols[:3]:
             if X_engineered[col].var() > 0:  # Only if column has variance
-                X_engineered[f'{col}_squared'] = X_engineered[col] ** 2
-                X_engineered[f'{col}_sqrt'] = np.sqrt(np.abs(X_engineered[col]))
+                # Square feature
+                feature_name = f'{col}_squared'
+                X_engineered[feature_name] = X_engineered[col] ** 2
+                
+                # Square root feature (handle negative values)
+                feature_name = f'{col}_sqrt'
+                X_engineered[feature_name] = np.sqrt(np.abs(X_engineered[col]))
+                
+                print(f"Created polynomial features for: {col}")
         
         # Log transform for highly skewed features
         for col in numerical_cols:
-            if X_engineered[col].skew() > 2 and (X_engineered[col] > 0).all():
-                X_engineered[f'{col}_log'] = np.log1p(X_engineered[col])
+            skewness = X_engineered[col].skew()
+            if abs(skewness) > 2 and (X_engineered[col] > 0).all():
+                feature_name = f'{col}_log'
+                X_engineered[feature_name] = np.log1p(X_engineered[col])
+                print(f"Created log feature for skewed column {col} (skewness: {skewness:.2f})")
         
         return X_engineered
     
@@ -177,16 +247,22 @@ class RegressionPipeline:
         categorical_encoders = {}
         X_encoded = X.copy()
         
-        for col in X.columns:
-            if X[col].dtype == 'object':
-                le = LabelEncoder()
-                X_encoded[col] = le.fit_transform(X[col].astype(str))
-                categorical_encoders[col] = le
+        categorical_cols = X.select_dtypes(include=['object']).columns
+        print(f"Found {len(categorical_cols)} categorical columns to encode")
+        
+        for col in categorical_cols:
+            print(f"Encoding categorical column: {col}")
+            le = LabelEncoder()
+            X_encoded[col] = le.fit_transform(X[col].astype(str))
+            categorical_encoders[col] = le
+            print(f"  - {col}: {len(le.classes_)} unique categories")
         
         return X_encoded, categorical_encoders
     
     def _setup_preprocessing(self, X):
         """Setup preprocessing pipeline"""
+        print(f"Setting up preprocessing with scaling method: {self.config['scaling_method']}")
+        
         # Initialize scaler based on config
         if self.config['scaling_method'] == 'standard':
             self.scaler = StandardScaler()
@@ -201,9 +277,15 @@ class RegressionPipeline:
         if self.config['feature_selection_k'] != 'all':
             k = min(self.config['feature_selection_k'], X.shape[1])
             self.feature_selector = SelectKBest(score_func=f_regression, k=k)
+            print(f"Feature selection enabled: selecting top {k} features")
+        else:
+            self.feature_selector = None
+            print("No feature selection applied")
     
     def train_models(self, X, y, progress_callback=None):
         """Train all regression models with hyperparameter tuning"""
+        print(f"Starting model training with {len(self.algorithms)} algorithms")
+        
         # Setup preprocessing
         self._setup_preprocessing(X)
         
@@ -213,76 +295,95 @@ class RegressionPipeline:
             random_state=self.config['random_state']
         )
         
+        print(f"Data split - Train: {X_train.shape}, Test: {X_test.shape}")
+        
         # Preprocessing
-        X_train_processed = self._preprocess_features(X_train, fit=True)
+        X_train_processed = self._preprocess_features(X_train, fit=True, y_train=y_train)
         X_test_processed = self._preprocess_features(X_test, fit=False)
         
-        self.results = {}
+        print(f"After preprocessing - Train: {X_train_processed.shape}, Test: {X_test_processed.shape}")
+        
         total_models = len(self.algorithms)
         
         for idx, (name, algorithm) in enumerate(self.algorithms.items()):
             try:
+                print(f"\nTraining {name} ({idx+1}/{total_models})...")
                 if progress_callback:
                     progress_callback(f"Training {name}...", (idx / total_models) * 80 + 10)
                 
-                # Hyperparameter tuning
+                # Hyperparameter tuning if enabled and hyperparameters exist
                 if self.config['hyperparameter_tuning'] and name in self.hyperparameters:
+                    print(f"  - Performing hyperparameter tuning...")
                     grid_search = GridSearchCV(
-                        algorithm, self.hyperparameters[name],
+                        algorithm, 
+                        self.hyperparameters[name],
                         cv=self.config['cross_validation_folds'],
-                        scoring='r2', n_jobs=-1
+                        scoring='r2',
+                        n_jobs=-1,
+                        verbose=0
                     )
-                    model = grid_search.fit(X_train_processed, y_train)
-                    best_model = model.best_estimator_
-                    best_params = model.best_params_
+                    grid_search.fit(X_train_processed, y_train)
+                    best_model = grid_search.best_estimator_
+                    best_params = grid_search.best_params_
+                    print(f"  - Best parameters: {best_params}")
                 else:
-                    best_model = algorithm.fit(X_train_processed, y_train)
+                    print(f"  - Training with default parameters...")
+                    best_model = algorithm
                     best_params = {}
+                    best_model.fit(X_train_processed, y_train)
                 
-                # Predictions
-                y_pred = best_model.predict(X_test_processed)
+                # Make predictions
+                y_pred_train = best_model.predict(X_train_processed)
+                y_pred_test = best_model.predict(X_test_processed)
+                
+                # Calculate metrics
+                metrics = self._calculate_metrics(y_train, y_pred_train, y_test, y_pred_test)
                 
                 # Cross-validation score
                 cv_scores = cross_val_score(
-                    best_model, X_train_processed, y_train,
-                    cv=self.config['cross_validation_folds'], scoring='r2'
+                    best_model, X_train_processed, y_train, 
+                    cv=self.config['cross_validation_folds'], 
+                    scoring='r2',
+                    n_jobs=-1
                 )
+                metrics['cv_score'] = cv_scores.mean()
+                metrics['cv_std'] = cv_scores.std()
                 
-                # Calculate all metrics
-                mse = mean_squared_error(y_test, y_pred)
-                self.results[name] = {
+                print(f"  - R² Score: {metrics['r2']:.4f}")
+                print(f"  - RMSE: {metrics['rmse']:.4f}")
+                print(f"  - CV Score: {metrics['cv_score']:.4f} ± {metrics['cv_std']:.4f}")
+                
+                # Store results
+                self.results[name] = metrics
+                self.trained_models[name] = {
                     'model': best_model,
-                    'best_params': best_params,
-                    'mse': mse,
-                    'mae': mean_absolute_error(y_test, y_pred),
-                    'r2': r2_score(y_test, y_pred),
-                    'rmse': np.sqrt(mse),
-                    'explained_variance': explained_variance_score(y_test, y_pred),
-                    'cv_mean': cv_scores.mean(),
-                    'cv_std': cv_scores.std(),
-                    'y_test': y_test,
-                    'y_pred': y_pred
+                    'params': best_params,
+                    'metrics': metrics
                 }
                 
                 # Update best model
-                if self.results[name]['r2'] > self.best_score:
-                    self.best_score = self.results[name]['r2']
+                if metrics['r2'] > self.best_score:
+                    self.best_score = metrics['r2']
                     self.best_model = name
+                    print(f"  - New best model: {name}")
                 
                 # Save model
                 self._save_model(name, best_model, best_params)
                 
             except Exception as e:
+                error_msg = f"Error training {name}: {str(e)}"
+                print(f"  - {error_msg}")
                 if progress_callback:
-                    progress_callback(f"Error training {name}: {str(e)}", (idx / total_models) * 80 + 10)
-                print(f"Error training {name}: {str(e)}")
+                    progress_callback(error_msg, (idx / total_models) * 80 + 10)
+        
+        print(f"\nTraining completed! Best model: {self.best_model} (R² = {self.best_score:.4f})")
     
-    def _preprocess_features(self, X, fit=False):
+    def _preprocess_features(self, X, fit=False, y_train=None):
         """Apply preprocessing to features"""
         if fit:
             X_processed = self.scaler.fit_transform(X)
             if self.feature_selector:
-                X_processed = self.feature_selector.fit_transform(X_processed, y=None)
+                X_processed = self.feature_selector.fit_transform(X_processed, y_train)
         else:
             X_processed = self.scaler.transform(X)
             if self.feature_selector:
@@ -290,28 +391,58 @@ class RegressionPipeline:
         
         return X_processed
     
+    def _calculate_metrics(self, y_train, y_pred_train, y_test, y_pred_test):
+        """Calculate comprehensive evaluation metrics"""
+        metrics = {}
+        
+        # Training metrics
+        metrics['r2_train'] = r2_score(y_train, y_pred_train)
+        metrics['mse_train'] = mean_squared_error(y_train, y_pred_train)
+        metrics['mae_train'] = mean_absolute_error(y_train, y_pred_train)
+        metrics['rmse_train'] = np.sqrt(metrics['mse_train'])
+        
+        # Test metrics
+        metrics['r2_test'] = r2_score(y_test, y_pred_test)
+        metrics['mse_test'] = mean_squared_error(y_test, y_pred_test)
+        metrics['mae_test'] = mean_absolute_error(y_test, y_pred_test)
+        metrics['rmse_test'] = np.sqrt(metrics['mse_test'])
+        
+        # Overall metrics (using test performance)
+        metrics['r2'] = metrics['r2_test']
+        metrics['mse'] = metrics['mse_test']
+        metrics['mae'] = metrics['mae_test']
+        metrics['rmse'] = metrics['rmse_test']
+        metrics['explained_variance'] = explained_variance_score(y_test, y_pred_test)
+        
+        return metrics
+    
     def _save_model(self, name, model, params):
         """Save trained model with metadata"""
         model_data = {
             'model': model,
             'scaler': self.scaler,
             'feature_selector': self.feature_selector,
-            'categorical_encoders': getattr(self, 'categorical_encoders', {}),
-            'target_encoder': getattr(self, 'target_encoder', None),
+            'categorical_encoders': self.categorical_encoders,
+            'target_encoder': self.target_encoder,
             'best_params': params,
             'config': self.config,
-            'data_info': getattr(self, 'data_info', {}),
+            'data_info': self.data_info,
             'timestamp': datetime.now().isoformat()
         }
         
-        filename = f"models/{name.replace(' ', '_').lower()}_model.pkl"
         os.makedirs('models', exist_ok=True)
+        filename = f"models/{name.replace(' ', '_').lower()}_model.pkl"
         
-        with open(filename, 'wb') as f:
-            pickle.dump(model_data, f)
+        try:
+            with open(filename, 'wb') as f:
+                pickle.dump(model_data, f)
+            print(f"  - Model saved: {filename}")
+        except Exception as e:
+            print(f"  - Error saving model: {str(e)}")
     
     def generate_plots(self, dataset_name, progress_callback=None):
         """Generate comprehensive visualizations"""
+        print("Generating visualization plots...")
         plots = {}
         
         plot_configs = [
@@ -325,159 +456,169 @@ class RegressionPipeline:
         for idx, (plot_type, title) in enumerate(plot_configs):
             try:
                 if progress_callback:
-                    progress_callback(f"Generating {title}...", 90 + (idx / len(plot_configs)) * 8)
+                    progress_callback(f"Generating {title}...", 90 + (idx / len(plot_configs)) * 10)
                 
-                plt.figure(figsize=(12, 8))
-                
-                if plot_type == "comparison":
-                    self._plot_model_comparison()
-                elif plot_type == "best_scatter":
-                    self._plot_best_model_scatter()
-                elif plot_type == "heatmap":
-                    self._plot_metrics_heatmap()
-                elif plot_type == "residuals":
-                    self._plot_residual_analysis()
-                elif plot_type == "feature_importance":
-                    self._plot_feature_importance()
-                
-                plt.tight_layout()
-                plot_path = f'static/plots/{plot_type}_{dataset_name}.png'
-                os.makedirs('static/plots', exist_ok=True)
-                plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                plots[plot_type] = plot_path
-                
+                plot_path = self._create_plot(plot_type, title, dataset_name)
+                if plot_path:
+                    plots[plot_type] = plot_path
+                    print(f"  - Generated: {plot_type}")
+                    
             except Exception as e:
-                print(f"Error generating {plot_type} plot: {str(e)}")
+                print(f"  - Error generating {plot_type} plot: {str(e)}")
         
         return plots
     
-    def _plot_model_comparison(self):
-        """Plot model performance comparison"""
-        models = list(self.results.keys())
-        r2_scores = [self.results[model]['r2'] for model in models]
-        colors = ['#FF6B6B' if model == self.best_model else '#4ECDC4' for model in models]
-        
-        bars = plt.bar(models, r2_scores, color=colors, alpha=0.8)
-        plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
-        plt.ylabel('R² Score', fontsize=12)
-        plt.xticks(rotation=45, ha='right')
-        plt.grid(True, alpha=0.3)
-        
-        # Add value labels on bars
-        for bar, score in zip(bars, r2_scores):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
-    
-    def _plot_best_model_scatter(self):
-        """Plot best model predictions vs actual"""
-        if self.best_model and self.best_model in self.results:
-            result = self.results[self.best_model]
-            y_test, y_pred = result['y_test'], result['y_pred']
+    def _create_plot(self, plot_type, title, dataset_name):
+        """Create individual plots"""
+        try:
+            plt.figure(figsize=(12, 8))
             
-            plt.scatter(y_test, y_pred, alpha=0.6, color='#4ECDC4', s=50)
-            
-            # Perfect prediction line
-            min_val, max_val = min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())
-            plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Prediction')
-            
-            plt.xlabel('Actual Values', fontsize=12)
-            plt.ylabel('Predicted Values', fontsize=12)
-            plt.title(f'Best Model ({self.best_model}): Predicted vs Actual\nR² = {result["r2"]:.4f}', 
-                     fontsize=16, fontweight='bold')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-    
-    def _plot_metrics_heatmap(self):
-        """Plot performance metrics heatmap"""
-        metrics = ['r2', 'mse', 'mae', 'rmse', 'explained_variance']
-        data = []
-        
-        for model in self.results.keys():
-            row = []
-            for metric in metrics:
-                value = self.results[model][metric]
-                # Normalize MSE, MAE, RMSE (lower is better) by taking negative
-                if metric in ['mse', 'mae', 'rmse']:
-                    value = -value
-                row.append(value)
-            data.append(row)
-        
-        df_metrics = pd.DataFrame(data, index=list(self.results.keys()), columns=metrics)
-        
-        sns.heatmap(df_metrics, annot=True, cmap='RdYlBu_r', center=0, 
-                   fmt='.3f', square=True, cbar_kws={'label': 'Score'})
-        plt.title('Model Performance Metrics Heatmap', fontsize=16, fontweight='bold')
-    
-    def _plot_residual_analysis(self):
-        """Plot residual analysis for best model"""
-        if self.best_model and self.best_model in self.results:
-            result = self.results[self.best_model]
-            y_test, y_pred = result['y_test'], result['y_pred']
-            residuals = y_test - y_pred
-            
-            plt.subplot(2, 2, 1)
-            plt.scatter(y_pred, residuals, alpha=0.6, color='#4ECDC4')
-            plt.axhline(y=0, color='r', linestyle='--')
-            plt.xlabel('Predicted Values')
-            plt.ylabel('Residuals')
-            plt.title('Residuals vs Predicted')
-            plt.grid(True, alpha=0.3)
-            
-            plt.subplot(2, 2, 2)
-            plt.hist(residuals, bins=20, alpha=0.7, color='#4ECDC4', edgecolor='black')
-            plt.xlabel('Residuals')
-            plt.ylabel('Frequency')
-            plt.title('Residuals Distribution')
-            plt.grid(True, alpha=0.3)
-            
-            plt.suptitle(f'Residual Analysis - {self.best_model}', fontsize=14, fontweight='bold')
-    
-    def _plot_feature_importance(self):
-        """Plot feature importance for best model if available"""
-        if self.best_model and self.best_model in self.results:
-            model = self.results[self.best_model]['model']
-            
-            # Get feature importance based on model type
-            if hasattr(model, 'feature_importances_'):
-                importance = model.feature_importances_
-                feature_names = [f'Feature_{i}' for i in range(len(importance))]
+            if plot_type == 'comparison':
+                # Model comparison bar plot
+                models = list(self.results.keys())
+                r2_scores = [self.results[model]['r2'] for model in models]
                 
-                # Sort by importance
-                indices = np.argsort(importance)[::-1][:10]  # Top 10 features
+                colors = plt.cm.viridis(np.linspace(0, 1, len(models)))
+                bars = plt.bar(models, r2_scores, color=colors)
                 
-                plt.bar(range(len(indices)), importance[indices], color='#4ECDC4', alpha=0.8)
-                plt.title(f'Top 10 Feature Importance - {self.best_model}', fontsize=16, fontweight='bold')
-                plt.ylabel('Importance Score')
-                plt.xlabel('Features')
-                plt.xticks(range(len(indices)), [feature_names[i] for i in indices], rotation=45)
-                plt.grid(True, alpha=0.3)
+                plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
+                plt.ylabel('R² Score', fontsize=12)
+                plt.xlabel('Models', fontsize=12)
+                plt.xticks(rotation=45, ha='right')
+                
+                # Add value labels on bars
+                for bar, score in zip(bars, r2_scores):
+                    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                            f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
+                
+                plt.grid(axis='y', alpha=0.3)
+                plt.tight_layout()
+                
+            elif plot_type == 'heatmap':
+                # Performance metrics heatmap
+                metrics_data = []
+                model_names = []
+                
+                for model in self.results:
+                    metrics_data.append([
+                        self.results[model]['r2'],
+                        self.results[model]['mse'],
+                        self.results[model]['mae'],
+                        self.results[model]['rmse']
+                    ])
+                    model_names.append(model)
+                
+                df_metrics = pd.DataFrame(
+                    metrics_data,
+                    index=model_names,
+                    columns=['R²', 'MSE', 'MAE', 'RMSE']
+                )
+                
+                sns.heatmap(df_metrics, annot=True, cmap='viridis', fmt='.3f', 
+                           cbar_kws={'label': 'Metric Value'})
+                plt.title('Performance Metrics Heatmap', fontsize=16, fontweight='bold')
+                plt.ylabel('Models', fontsize=12)
+                plt.xlabel('Metrics', fontsize=12)
+                plt.tight_layout()
+            
             else:
-                plt.text(0.5, 0.5, f'Feature importance not available\nfor {self.best_model}', 
-                        ha='center', va='center', transform=plt.gca().transAxes, fontsize=14)
-                plt.title('Feature Importance', fontsize=16, fontweight='bold')
+                # For other plot types, create informational plots
+                plt.text(0.5, 0.5, f'{title}\n(Available after training completion)', 
+                        ha='center', va='center', transform=plt.gca().transAxes,
+                        fontsize=14, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+                plt.title(title, fontsize=16, fontweight='bold')
+                plt.axis('off')
+            
+            # Save plot
+            os.makedirs('static/plots', exist_ok=True)
+            plot_filename = f"{dataset_name}_{plot_type}.png"
+            plot_path = f"static/plots/{plot_filename}"
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            return f"/static/plots/{plot_filename}"
+            
+        except Exception as e:
+            print(f"Error creating {plot_type} plot: {str(e)}")
+            plt.close()
+            return None
     
     def get_model_summary(self):
-        """Get comprehensive model summary"""
-        summary = {
-            'total_models': len(self.results),
+        """Get summary of all trained models"""
+        return self.results
+    
+    def get_best_model(self):
+        """Get the best performing model"""
+        if self.best_model and self.best_model in self.trained_models:
+            return self.trained_models[self.best_model]
+        return None
+    
+    def predict(self, X, model_name=None):
+        """Make predictions using a specific model or the best model"""
+        if model_name is None:
+            model_name = self.best_model
+        
+        if model_name not in self.trained_models:
+            raise ValueError(f"Model '{model_name}' not found")
+        
+        model = self.trained_models[model_name]['model']
+        
+        # Preprocess features
+        X_processed = self._preprocess_features(X, fit=False)
+        
+        # Make predictions
+        predictions = model.predict(X_processed)
+        
+        # Inverse transform if target was encoded
+        if self.target_encoder:
+            predictions = self.target_encoder.inverse_transform(predictions.astype(int))
+        
+        return predictions
+    
+    def save_pipeline(self, filepath):
+        """Save the entire pipeline"""
+        pipeline_data = {
+            'config': self.config,
+            'results': self.results,
             'best_model': self.best_model,
             'best_score': self.best_score,
-            'data_info': getattr(self, 'data_info', {}),
-            'config': self.config,
-            'model_results': {}
+            'data_info': self.data_info,
+            'scaler': self.scaler,
+            'feature_selector': self.feature_selector,
+            'categorical_encoders': self.categorical_encoders,
+            'target_encoder': self.target_encoder,
+            'trained_models': self.trained_models,
+            'timestamp': datetime.now().isoformat()
         }
         
-        for name, result in self.results.items():
-            summary['model_results'][name] = {
-                'r2': result['r2'],
-                'mse': result['mse'],
-                'mae': result['mae'],
-                'rmse': result['rmse'],
-                'explained_variance': result['explained_variance'],
-                'cv_mean': result['cv_mean'],
-                'cv_std': result['cv_std'],
-                'best_params': result['best_params']
-            }
-        
-        return summary
+        try:
+            with open(filepath, 'wb') as f:
+                pickle.dump(pipeline_data, f)
+            print(f"Pipeline saved to: {filepath}")
+        except Exception as e:
+            print(f"Error saving pipeline: {str(e)}")
+    
+    @classmethod
+    def load_pipeline(cls, filepath):
+        """Load a saved pipeline"""
+        try:
+            with open(filepath, 'rb') as f:
+                pipeline_data = pickle.load(f)
+            
+            pipeline = cls(pipeline_data['config'])
+            pipeline.results = pipeline_data['results']
+            pipeline.best_model = pipeline_data['best_model']
+            pipeline.best_score = pipeline_data['best_score']
+            pipeline.data_info = pipeline_data['data_info']
+            pipeline.scaler = pipeline_data['scaler']
+            pipeline.feature_selector = pipeline_data['feature_selector']
+            pipeline.categorical_encoders = pipeline_data.get('categorical_encoders', {})
+            pipeline.target_encoder = pipeline_data.get('target_encoder', None)
+            pipeline.trained_models = pipeline_data['trained_models']
+            
+            print(f"Pipeline loaded from: {filepath}")
+            return pipeline
+            
+        except Exception as e:
+            print(f"Error loading pipeline: {str(e)}")
+            raise

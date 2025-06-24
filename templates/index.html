@@ -4,14 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ML Pipeline Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.4/socket.io.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>ML Pipeline</h1>
+            <h1>ML Pipeline Dashboard</h1>
             <p>End-to-End Machine Learning with Real-time Monitoring & Data Cleaning</p>
         </div>
 
@@ -38,16 +37,16 @@
 
                     <div id="file-list" class="file-list"></div>
 
-                    <div class="dataset-selection" style="margin-top: 20px;">
-                        <label for="dataset-select" style="display: block; margin-bottom: 10px; font-weight: 600;">Available Datasets:</label>
-                        <select id="dataset-select" class="select-field" style="width: 100%; margin-bottom: 15px;">
+                    <div class="dataset-selection">
+                        <label for="dataset-select" class="form-label">Available Datasets:</label>
+                        <select id="dataset-select" class="form-select">
                             <option value="">-- Select Dataset --</option>
                             {% for dataset in datasets %}
                             <option value="{{ dataset }}">{{ dataset }}</option>
                             {% endfor %}
                         </select>
                         
-                        <div style="display: flex; gap: 10px;">
+                        <div class="action-buttons">
                             <button id="clean-data-btn" class="btn btn-warning" disabled>
                                 🧹 Clean Data
                             </button>
@@ -68,7 +67,7 @@
                     </div>
 
                     <div class="progress-container">
-                        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+                        <div class="progress-bar" id="progress-bar"></div>
                     </div>
 
                     <div class="activity-stream" id="activity-stream">
@@ -133,7 +132,7 @@
                     </div>
 
                     <div class="models-comparison">
-                        <h3 style="margin-bottom: 20px;">📈 Model Performance Comparison</h3>
+                        <h3>📈 Model Performance Comparison</h3>
                         <table class="models-table" id="models-table">
                             <thead>
                                 <tr>
@@ -167,6 +166,7 @@
             <p id="loading-message">Please wait while we process your request.</p>
         </div>
     </div>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

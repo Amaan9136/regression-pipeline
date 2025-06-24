@@ -1,14 +1,18 @@
+// Initialize Socket.IO connection
 const socket = io();
 let sessionId = null;
 let currentDataset = null;
 let cleaningOperations = {};
 
+// Constants
 const ALERT_AUTO_REMOVE_DELAY = 5000;
 const MAX_ACTIVITY_LOGS = 50;
 
+// Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     initializeEventListeners();
     setupWebSocket();
+    initializeFileUpload();
 });
 
 function initializeEventListeners() {
@@ -17,20 +21,44 @@ function initializeEventListeners() {
     const uploadZone = document.getElementById('upload-zone');
     const datasetSelect = document.getElementById('dataset-select');
     
-    // Drag and drop functionality
-    uploadZone.addEventListener('dragover', handleDragOver);
-    uploadZone.addEventListener('dragleave', handleDragLeave);
-    uploadZone.addEventListener('drop', handleFileDrop);
-    uploadZone.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', handleFileSelect);
+    if (uploadZone) {
+        // Drag and drop functionality
+        uploadZone.addEventListener('dragover', handleDragOver);
+        uploadZone.addEventListener('dragleave', handleDragLeave);
+        uploadZone.addEventListener('drop', handleFileDrop);
+        uploadZone.addEventListener('click', () => fileInput?.click());
+    }
+    
+    if (fileInput) {
+        fileInput.addEventListener('change', handleFileSelect);
+    }
     
     // Dataset selection
-    datasetSelect.addEventListener('change', handleDatasetSelection);
+    if (datasetSelect) {
+        datasetSelect.addEventListener('change', handleDatasetSelection);
+    }
     
     // Action buttons
-    document.getElementById('clean-data-btn').addEventListener('click', showCleaningInterface);
-    document.getElementById('train-models-btn').addEventListener('click', startTraining);
-    document.getElementById('apply-cleaning-btn').addEventListener('click', applyCleaningOperations);
+    const cleanDataBtn = document.getElementById('clean-data-btn');
+    const trainModelsBtn = document.getElementById('train-models-btn');
+    const applyCleaningBtn = document.getElementById('apply-cleaning-btn');
+    const exportResultsBtn = document.getElementById('export-results-btn');
+    
+    if (cleanDataBtn) {
+        cleanDataBtn.addEventListener('click', showCleaningInterface);
+    }
+    
+    if (trainModelsBtn) {
+        trainModelsBtn.addEventListener('click', startTraining);
+    }
+    
+    if (applyCleaningBtn) {
+        applyCleaningBtn.addEventListener('click', applyCleaningOperations);
+    }
+    
+    if (exportResultsBtn) {
+        exportResultsBtn.addEventListener('click', exportResults);
+    }
     
     // Cleaning tabs
     document.querySelectorAll('.tab').forEach(tab => {
@@ -42,6 +70,7 @@ function setupWebSocket() {
     socket.on('session_created', (data) => {
         sessionId = data.session_id;
         addActivityLog('Session created successfully', 0);
+        updateConnectionStatus(true);
     });
 
     socket.on('training_progress', (data) => {
@@ -56,16 +85,27 @@ function setupWebSocket() {
     socket.on('training_error', (data) => {
         showAlert('Training failed: ' + data.error, 'error');
         hideLoading();
+        updateProgress(0, 'Training failed');
     });
 
     socket.on('connect', () => {
         console.log('Connected to server');
+        updateConnectionStatus(true);
     });
 
     socket.on('disconnect', () => {
         console.log('Disconnected from server');
+        updateConnectionStatus(false);
         showAlert('Connection lost. Please refresh the page.', 'warning');
     });
+}
+
+function initializeFileUpload() {
+    // Initialize drag and drop styling
+    const uploadZone = document.getElementById('upload-zone');
+    if (uploadZone) {
+        uploadZone.classList.add('upload-ready');
+    }
 }
 
 // File handling functions
@@ -127,9 +167,12 @@ async function uploadFile(file) {
             addActivityLog(`Uploaded: ${file.name}`, 100);
             
             // Auto-select the uploaded file
-            document.getElementById('dataset-select').value = result.filename;
-            currentDataset = result.filename;
-            await loadDatasetInfo(result.filename);
+            const datasetSelect = document.getElementById('dataset-select');
+            if (datasetSelect) {
+                datasetSelect.value = result.filename;
+                currentDataset = result.filename;
+                await loadDatasetInfo(result.filename);
+            }
         } else {
             showAlert(`Upload failed: ${result.error}`, 'error');
         }
@@ -142,6 +185,7 @@ async function uploadFile(file) {
 
 function addDatasetToSelect(filename) {
     const select = document.getElementById('dataset-select');
+    if (!select) return;
     
     // Check if option already exists
     const existingOption = Array.from(select.options).find(option => option.value === filename);
@@ -159,20 +203,19 @@ async function handleDatasetSelection(e) {
     
     currentDataset = filename;
     await loadDatasetInfo(filename);
-    addActivityLog(`Selected dataset: ${filename}`, 100);
+    addActivityLog(`Selected dataset: ${filename}`, 0);
 }
 
 async function loadDatasetInfo(filename) {
     try {
         showLoading('Loading dataset information...');
         
-        const response = await fetch(`/api/get_column_info/${filename}`);
+        const response = await fetch(`/api/dataset_info/${filename}`);
         const result = await response.json();
         
         if (result.success) {
-            populateDatasetOverview(result.column_info, result.dataset_shape);
-            populateCleaningTabs(result.column_info);
-            document.getElementById('clean-data-btn').disabled = false;
+            displayDatasetInfo(result.dataset_info);
+            enableActionButtons();
         } else {
             showAlert(`Failed to load dataset info: ${result.error}`, 'error');
         }
@@ -183,352 +226,355 @@ async function loadDatasetInfo(filename) {
     }
 }
 
-// Data cleaning interface functions
-function showCleaningInterface() {
-    if (!currentDataset) {
-        showAlert('Please select a dataset first', 'warning');
-        return;
-    }
-    
-    document.getElementById('cleaning-interface').style.display = 'block';
-    addActivityLog('Opened data cleaning interface', 0);
-}
-
-function switchTab(tabName) {
-    // Remove active class from all tabs and content
-    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-    
-    // Add active class to selected tab and content
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-}
-
-function populateDatasetOverview(columnInfo, shape) {
-    const overview = document.getElementById('dataset-overview');
-    const totalMissing = Object.values(columnInfo).reduce((sum, col) => sum + col.missing_count, 0);
-    const categoricalCount = Object.values(columnInfo).filter(col => col.dtype === 'object').length;
-    
-    overview.innerHTML = `
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-value">${shape[0].toLocaleString()}</div>
-                <div class="metric-label">Rows</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">${shape[1]}</div>
-                <div class="metric-label">Columns</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">${totalMissing.toLocaleString()}</div>
-                <div class="metric-label">Missing Values</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-value">${categoricalCount}</div>
-                <div class="metric-label">Categorical Columns</div>
-            </div>
-        </div>
-    `;
-}
-
-function populateCleaningTabs(columnInfo) {
-    // Columns tab
-    populateColumnsTab(columnInfo);
-    
-    // Missing values tab
-    populateMissingValuesTab(columnInfo);
-    
-    // Encoding tab
-    populateEncodingTab(columnInfo);
-}
-
-function populateColumnsTab(columnInfo) {
-    const columnsList = document.getElementById('columns-list');
-    columnsList.innerHTML = Object.entries(columnInfo).map(([colName, info]) => `
-        <div class="column-item">
-            <div class="column-info">
-                <div class="column-name">${colName}</div>
-                <div class="column-details">
-                    Type: ${info.dtype} | Missing: ${info.missing_count} (${info.missing_percentage.toFixed(1)}%) | 
-                    Unique: ${info.unique_values}
+function displayDatasetInfo(datasetInfo) {
+    // Update overview tab
+    const overviewTab = document.getElementById('overview-tab');
+    if (overviewTab) {
+        overviewTab.innerHTML = `
+            <div class="dataset-overview">
+                <h3>Dataset Overview</h3>
+                <div class="overview-grid">
+                    <div class="overview-item">
+                        <span class="label">Filename:</span>
+                        <span class="value">${datasetInfo.filename}</span>
+                    </div>
+                    <div class="overview-item">
+                        <span class="label">Shape:</span>
+                        <span class="value">${datasetInfo.shape[0]} rows × ${datasetInfo.shape[1]} columns</span>
+                    </div>
+                    <div class="overview-item">
+                        <span class="label">Memory Usage:</span>
+                        <span class="value">${datasetInfo.memory_usage.toFixed(2)} MB</span>
+                    </div>
+                    <div class="overview-item">
+                        <span class="label">Quality Score:</span>
+                        <span class="value">${datasetInfo.quality_report.quality_score.toFixed(1)}%</span>
+                    </div>
+                </div>
+                
+                <h4>Missing Values</h4>
+                <div class="missing-values-summary">
+                    ${Object.keys(datasetInfo.missing_values).length > 0 ? 
+                        Object.entries(datasetInfo.missing_values).map(([col, info]) => 
+                            `<div class="missing-item">
+                                <span class="column">${col}:</span>
+                                <span class="count">${info.count} (${info.percentage.toFixed(1)}%)</span>
+                            </div>`
+                        ).join('') : 
+                        '<p>No missing values found</p>'
+                    }
+                </div>
+                
+                <h4>Data Types</h4>
+                <div class="dtypes-summary">
+                    ${Object.entries(datasetInfo.dtypes).map(([col, dtype]) => 
+                        `<div class="dtype-item">
+                            <span class="column">${col}:</span>
+                            <span class="dtype">${dtype}</span>
+                        </div>`
+                    ).join('')}
                 </div>
             </div>
-            <div class="column-actions">
-                <input type="text" class="input-field" placeholder="Rename to..." 
-                       onchange="updateRename('${colName}', this.value)">
-                <button class="btn btn-warning" onclick="markForDrop('${colName}')">Drop</button>
+        `;
+    }
+    
+    // Update columns tab
+    displayColumnInfo(datasetInfo.columns);
+    
+    // Update missing values tab
+    displayMissingValuesInfo(datasetInfo.missing_values);
+}
+
+function displayColumnInfo(columns) {
+    const columnsList = document.getElementById('columns-list');
+    if (!columnsList) return;
+    
+    columnsList.innerHTML = Object.entries(columns).map(([col, info]) => `
+        <div class="column-item">
+            <div class="column-header">
+                <h4>${col}</h4>
+                <span class="column-type">${info.dtype}</span>
+            </div>
+            <div class="column-details">
+                <p><strong>Missing:</strong> ${info.missing_count} (${info.missing_percentage.toFixed(1)}%)</p>
+                <p><strong>Unique values:</strong> ${info.unique_values}</p>
+                ${info.min !== undefined ? `
+                    <p><strong>Range:</strong> ${info.min.toFixed(2)} - ${info.max.toFixed(2)}</p>
+                    <p><strong>Mean:</strong> ${info.mean.toFixed(2)} ± ${info.std.toFixed(2)}</p>
+                ` : ''}
+                <p><strong>Sample values:</strong> ${info.sample_values.join(', ')}</p>
             </div>
         </div>
     `).join('');
 }
 
-function populateMissingValuesTab(columnInfo) {
+function displayMissingValuesInfo(missingValues) {
     const missingContent = document.getElementById('missing-values-content');
-    const columnsWithMissing = Object.entries(columnInfo).filter(([_, info]) => info.missing_count > 0);
+    if (!missingContent) return;
     
-    if (columnsWithMissing.length === 0) {
-        missingContent.innerHTML = '<div class="alert alert-success">✅ No missing values detected!</div>';
+    if (Object.keys(missingValues).length === 0) {
+        missingContent.innerHTML = '<p class="no-missing">No missing values found in the dataset.</p>';
         return;
     }
-
+    
     missingContent.innerHTML = `
-        <div class="alert alert-info">📊 ${columnsWithMissing.length} columns have missing values</div>
-        <div class="column-list">
-            ${columnsWithMissing.map(([colName, info]) => `
-                <div class="column-item">
-                    <div class="column-info">
-                        <div class="column-name">${colName}</div>
-                        <div class="column-details">
-                            Missing: ${info.missing_count} values (${info.missing_percentage.toFixed(1)}%)
-                        </div>
-                    </div>
-                    <div class="column-actions">
-                        <select class="select-field" onchange="updateMissingStrategy('${colName}', this.value)">
-                            <option value="">Choose strategy...</option>
-                            <option value="drop">Drop rows</option>
-                            ${info.dtype === 'object' ? '' : '<option value="mean">Fill with mean</option>'}
-                            ${info.dtype === 'object' ? '' : '<option value="median">Fill with median</option>'}
-                            <option value="mode">Fill with mode</option>
-                            <option value="forward_fill">Forward fill</option>
-                            <option value="backward_fill">Backward fill</option>
-                            <option value="custom_value">Custom value</option>
-                        </select>
-                        <input type="text" class="input-field" id="custom-${colName}" 
-                               placeholder="Enter custom value" style="display: none;">
-                    </div>
+        <div class="missing-values-interface">
+            <h3>Handle Missing Values</h3>
+            ${Object.entries(missingValues).map(([col, info]) => `
+                <div class="missing-column">
+                    <h4>${col}</h4>
+                    <p>Missing: ${info.count} values (${info.percentage.toFixed(1)}%)</p>
+                    <select class="missing-strategy" data-column="${col}">
+                        <option value="drop">Drop rows</option>
+                        <option value="mean">Fill with mean</option>
+                        <option value="median">Fill with median</option>
+                        <option value="mode">Fill with mode</option>
+                        <option value="forward_fill">Forward fill</option>
+                        <option value="backward_fill">Backward fill</option>
+                    </select>
                 </div>
             `).join('')}
         </div>
     `;
 }
 
-function populateEncodingTab(columnInfo) {
-    const encodingContent = document.getElementById('encoding-content');
-    const categoricalColumns = Object.entries(columnInfo).filter(([_, info]) => info.dtype === 'object');
+function enableActionButtons() {
+    const cleanDataBtn = document.getElementById('clean-data-btn');
+    const trainModelsBtn = document.getElementById('train-models-btn');
     
-    if (categoricalColumns.length === 0) {
-        encodingContent.innerHTML = '<div class="alert alert-info">No categorical columns found</div>';
-        return;
+    if (cleanDataBtn) {
+        cleanDataBtn.disabled = false;
+        cleanDataBtn.classList.remove('disabled');
     }
-
-    encodingContent.innerHTML = `
-        <div class="alert alert-info">🔤 ${categoricalColumns.length} categorical columns found</div>
-        <div class="column-list">
-            ${categoricalColumns.map(([colName, info]) => `
-                <div class="column-item">
-                    <div class="column-info">
-                        <div class="column-name">${colName}</div>
-                        <div class="column-details">
-                            Unique values: ${info.unique_values} | 
-                            Sample: ${info.sample_values.slice(0, 3).join(', ')}...
-                        </div>
-                    </div>
-                    <div class="column-actions">
-                        <select class="select-field" onchange="updateEncodingStrategy('${colName}', this.value)">
-                            <option value="">Choose encoding...</option>
-                            <option value="label">Label Encoding</option>
-                            <option value="onehot">One-Hot Encoding</option>
-                            <option value="ordinal">Ordinal Encoding</option>
-                        </select>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
-// Cleaning operation handlers
-function updateRename(columnName, newName) {
-    if (!cleaningOperations.rename_columns) cleaningOperations.rename_columns = {};
-    if (newName.trim()) {
-        cleaningOperations.rename_columns[columnName] = newName.trim();
-        addActivityLog(`Marked "${columnName}" for rename to "${newName.trim()}"`, 0);
-    } else {
-        delete cleaningOperations.rename_columns[columnName];
+    
+    if (trainModelsBtn) {
+        trainModelsBtn.disabled = false;
+        trainModelsBtn.classList.remove('disabled');
     }
 }
 
-function markForDrop(columnName) {
-    if (!cleaningOperations.drop_columns) cleaningOperations.drop_columns = [];
-    if (!cleaningOperations.drop_columns.includes(columnName)) {
-        cleaningOperations.drop_columns.push(columnName);
-        showAlert(`Marked "${columnName}" for deletion`, 'info');
-        addActivityLog(`Marked "${columnName}" for deletion`, 0);
+function showCleaningInterface() {
+    const cleaningInterface = document.getElementById('cleaning-interface');
+    if (cleaningInterface) {
+        cleaningInterface.style.display = 'block';
+        cleaningInterface.scrollIntoView({ behavior: 'smooth' });
     }
-}
-
-function updateMissingStrategy(columnName, strategy) {
-    if (!cleaningOperations.missing_values) cleaningOperations.missing_values = {};
-    
-    cleaningOperations.missing_values[columnName] = { method: strategy };
-    
-    // Show/hide custom value input
-    const customInput = document.getElementById(`custom-${columnName}`);
-    if (strategy === 'custom_value' && customInput) {
-        customInput.style.display = 'block';
-        customInput.onchange = (e) => {
-            cleaningOperations.missing_values[columnName].value = e.target.value;
-        };
-    } else if (customInput) {
-        customInput.style.display = 'none';
-    }
-    
-    addActivityLog(`Set missing value strategy for "${columnName}": ${strategy}`, 0);
-}
-
-function updateEncodingStrategy(columnName, strategy) {
-    if (!cleaningOperations.categorical_encoding) cleaningOperations.categorical_encoding = {};
-    cleaningOperations.categorical_encoding[columnName] = { method: strategy };
-    addActivityLog(`Set encoding strategy for "${columnName}": ${strategy}`, 0);
+    addActivityLog('Opened data cleaning interface', 0);
 }
 
 async function applyCleaningOperations() {
-    if (!currentDataset || Object.keys(cleaningOperations).length === 0) {
-        showAlert('No cleaning operations to apply', 'warning');
+    if (!currentDataset) {
+        showAlert('Please select a dataset first', 'warning');
         return;
     }
-
+    
     try {
-        showLoading('Applying data cleaning operations...');
-        addActivityLog('Applying cleaning operations...', 0);
+        showLoading('Applying cleaning operations...');
+        
+        // Collect cleaning operations from UI
+        const operations = {};
+        
+        // Get missing value strategies
+        const missingStrategies = {};
+        document.querySelectorAll('.missing-strategy').forEach(select => {
+            const column = select.dataset.column;
+            const method = select.value;
+            if (method !== 'none') {
+                missingStrategies[column] = { method: method };
+            }
+        });
+        
+        if (Object.keys(missingStrategies).length > 0) {
+            operations.missing_values = missingStrategies;
+        }
         
         const response = await fetch('/api/apply_cleaning', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify({
                 filename: currentDataset,
-                operations: cleaningOperations
+                operations: operations
             })
         });
-
+        
         const result = await response.json();
         
         if (result.success) {
-            showAlert(`Data cleaned successfully! New file: ${result.cleaned_filename}`, 'success');
+            showAlert('Data cleaning applied successfully!', 'success');
+            addActivityLog(`Cleaned data saved as: ${result.cleaned_filename}`, 100);
+            
+            // Add cleaned dataset to select
             addDatasetToSelect(result.cleaned_filename);
-            document.getElementById('dataset-select').value = result.cleaned_filename;
-            currentDataset = result.cleaned_filename;
-            addActivityLog(`Data cleaning completed`, 100);
             
-            // Reset cleaning operations
-            cleaningOperations = {};
-            
-            // Display cleaning summary
-            displayCleaningSummary(result);
+            // Update UI with results
+            displayCleaningResults(result);
         } else {
-            showAlert('Cleaning failed: ' + result.error, 'error');
+            showAlert(`Cleaning failed: ${result.error}`, 'error');
         }
     } catch (error) {
-        showAlert('Cleaning error: ' + error.message, 'error');
+        showAlert(`Error applying cleaning: ${error.message}`, 'error');
     } finally {
         hideLoading();
     }
 }
 
-function displayCleaningSummary(result) {
-    const summaryHtml = `
-        <div class="alert alert-success">
-            <h4>🎉 Cleaning Summary</h4>
-            <p><strong>Original shape:</strong> ${result.original_shape[0]} × ${result.original_shape[1]}</p>
-            <p><strong>Final shape:</strong> ${result.final_shape[0]} × ${result.final_shape[1]}</p>
-            <p><strong>Quality Score:</strong> ${result.quality_report.quality_score.toFixed(1)}/100</p>
-            ${result.validation.is_valid ? 
-                '<p>✅ Dataset is ready for training!</p>' : 
-                '<p>⚠️ Dataset may need additional cleaning</p>'
-            }
+function displayCleaningResults(results) {
+    const resultHtml = `
+        <div class="cleaning-results">
+            <h3>Cleaning Results</h3>
+            <p><strong>Original shape:</strong> ${results.original_shape[0]} × ${results.original_shape[1]}</p>
+            <p><strong>Final shape:</strong> ${results.final_shape[0]} × ${results.final_shape[1]}</p>
+            <p><strong>Quality score:</strong> ${results.quality_report.quality_score.toFixed(1)}%</p>
+            
+            ${results.results.missing_values_handled ? `
+                <h4>Missing Values Handled:</h4>
+                <ul>
+                    ${Object.entries(results.results.missing_values_handled).map(([col, info]) => 
+                        `<li>${col}: ${info}</li>`
+                    ).join('')}
+                </ul>
+            ` : ''}
         </div>
     `;
     
-    const overviewTab = document.getElementById('overview-tab');
-    overviewTab.innerHTML = summaryHtml + overviewTab.innerHTML;
+    // Display results in a modal or dedicated area
+    showAlert('Cleaning completed successfully!', 'success');
 }
 
-// Training functions
 async function startTraining() {
-    if (!currentDataset || !sessionId) {
-        showAlert('Please select a dataset and ensure connection is established', 'warning');
+    if (!currentDataset) {
+        showAlert('Please select a dataset first', 'warning');
         return;
     }
-
-    // Get training configuration
-    const config = {
-        test_size: 0.2,
-        cross_validation_folds: 5,
-        hyperparameter_tuning: true,
-        feature_engineering: true
-    };
-
-    addActivityLog('Starting model training...', 0);
-    document.getElementById('results-section').style.display = 'none';
     
-    // Emit training start event
-    socket.emit('start_training', {
-        session_id: sessionId,
-        dataset: currentDataset,
-        config: config
-    });
+    if (!sessionId) {
+        showAlert('Session not established. Please refresh the page.', 'error');
+        return;
+    }
+    
+    try {
+        showLoading('Starting model training...');
+        
+        const config = {
+            test_size: 0.2,
+            random_state: 42,
+            cross_validation_folds: 5,
+            hyperparameter_tuning: true,
+            feature_engineering: true
+        };
+        
+        socket.emit('start_training', {
+            session_id: sessionId,
+            dataset: currentDataset,
+            config: config
+        });
+        
+        addActivityLog('Training started...', 0);
+        
+    } catch (error) {
+        showAlert(`Error starting training: ${error.message}`, 'error');
+        hideLoading();
+    }
 }
 
 function displayTrainingResults(data) {
-    document.getElementById('results-section').style.display = 'block';
+    hideLoading();
     
-    // Update model comparison table
-    updateModelComparison(data.models);
-    
-    // Update visualizations
-    if (data.plots) {
-        updateVisualizationGrid(data.plots);
+    const resultsSection = document.getElementById('results-section');
+    if (resultsSection) {
+        resultsSection.style.display = 'block';
+        resultsSection.scrollIntoView({ behavior: 'smooth' });
     }
     
-    addActivityLog('Model training completed successfully!', 100);
-    hideLoading();
+    // Display model summary
+    if (data.model_summary) {
+        displayModelSummary(data.model_summary);
+    }
+    
+    // Display visualizations
+    if (data.plots) {
+        displayPlots(data.plots);
+    }
+    
+    addActivityLog('Training completed successfully!', 100);
+    showAlert('Model training completed successfully!', 'success');
 }
 
-function updateModelComparison(models) {
-    const tableBody = document.getElementById('model-comparison-body');
+function displayModelSummary(modelSummary) {
+    const modelsTable = document.getElementById('models-tbody');
+    if (!modelsTable) return;
     
-    // Find best model (highest R²)
-    const bestModel = Object.keys(models).reduce((best, current) => 
-        models[current].r2 > models[best].r2 ? current : best
-    );
-    
-    tableBody.innerHTML = Object.entries(models).map(([modelName, results]) => `
-        <tr class="${modelName === bestModel ? 'best-model-row' : ''}">
-            <td><strong>${modelName}</strong></td>
-            <td>${results.r2.toFixed(4)}</td>
-            <td>${results.mse.toFixed(4)}</td>
-            <td>${results.mae.toFixed(4)}</td>
-            <td>${results.rmse.toFixed(4)}</td>
-            <td>${results.cv_mean.toFixed(3)} ± ${results.cv_std.toFixed(3)}</td>
+    modelsTable.innerHTML = Object.entries(modelSummary).map(([model, metrics]) => `
+        <tr>
+            <td><strong>${model}</strong></td>
+            <td>${metrics.r2 ? metrics.r2.toFixed(4) : 'N/A'}</td>
+            <td>${metrics.mse ? metrics.mse.toFixed(4) : 'N/A'}</td>
+            <td>${metrics.mae ? metrics.mae.toFixed(4) : 'N/A'}</td>
+            <td>${metrics.rmse ? metrics.rmse.toFixed(4) : 'N/A'}</td>
+            <td>${metrics.cv_score ? `${metrics.cv_score.toFixed(4)} ± ${metrics.cv_std.toFixed(4)}` : 'N/A'}</td>
             <td>
-                <button class="btn btn-primary" onclick="showModelDetails('${modelName}')">
-                    📊 Details
+                <button class="btn btn-sm btn-info" onclick="showModelDetails('${model}')">
+                    Details
                 </button>
             </td>
         </tr>
     `).join('');
 }
 
-function updateVisualizationGrid(plots) {
-    const vizGrid = document.getElementById('visualization-grid');
-    const plotTitles = {
-        'comparison': '📊 Model Performance Comparison',
-        'best_scatter': '🎯 Best Model: Predicted vs Actual',
-        'heatmap': '🔥 Performance Metrics Heatmap',
-        'residuals': '📈 Residual Analysis',
-        'feature_importance': '🔑 Feature Importance'
-    };
-
-    vizGrid.innerHTML = Object.entries(plots).map(([plotType, plotPath]) => `
-        <div class="viz-card">
-            <div class="viz-title">${plotTitles[plotType] || 'Analysis Plot'}</div>
-            <img src="/${plotPath}" alt="${plotTitles[plotType]}" 
-                 onerror="this.style.display='none'" loading="lazy">
+function displayPlots(plots) {
+    const visualizationGrid = document.getElementById('visualization-grid');
+    if (!visualizationGrid) return;
+    
+    visualizationGrid.innerHTML = Object.entries(plots).map(([plotName, plotPath]) => `
+        <div class="visualization-card">
+            <h4>${plotName.replace('_', ' ').toUpperCase()}</h4>
+            <img src="${plotPath}" alt="${plotName}" class="plot-image">
         </div>
     `).join('');
 }
 
-// Progress and activity functions
+async function exportResults() {
+    if (!currentDataset) {
+        showAlert('No training results to export', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading('Exporting results...');
+        
+        const datasetName = currentDataset.replace('.csv', '');
+        const response = await fetch(`/api/export_results/${datasetName}`);
+        const result = await response.json();
+        
+        if (result.success) {
+            showAlert('Results exported successfully!', 'success');
+            addActivityLog('Results exported', 100);
+        } else {
+            showAlert(`Export failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showAlert(`Export error: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function switchTab(tabName) {
+    // Remove active class from all tabs and contents
+    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    
+    // Add active class to selected tab and content
+    const selectedTab = document.querySelector(`[data-tab="${tabName}"]`);
+    const selectedContent = document.getElementById(`${tabName}-tab`);
+    
+    if (selectedTab) selectedTab.classList.add('active');
+    if (selectedContent) selectedContent.classList.add('active');
+}
+
+// Progress and UI update functions
 function updateProgress(progress, message) {
     const progressBar = document.querySelector('.progress-bar');
     const progressText = document.querySelector('.progress-text');
@@ -547,13 +593,13 @@ function addActivityLog(message, progress) {
     const activityStream = document.getElementById('activity-stream');
     if (!activityStream) return;
     
+    const timestamp = new Date().toLocaleTimeString();
     const logItem = document.createElement('div');
     logItem.className = 'activity-item';
     logItem.innerHTML = `
-        <div class="activity-content">
-            <span class="activity-message">${message}</span>
-            <span class="activity-progress">${progress}%</span>
-        </div>
+        <span class="activity-timestamp">${timestamp}</span>
+        <span class="activity-message">${message}</span>
+        <span class="activity-progress">${progress}%</span>
     `;
     
     activityStream.insertBefore(logItem, activityStream.firstChild);
@@ -561,6 +607,14 @@ function addActivityLog(message, progress) {
     // Limit activity logs to prevent memory issues
     while (activityStream.children.length > MAX_ACTIVITY_LOGS) {
         activityStream.removeChild(activityStream.lastChild);
+    }
+}
+
+function updateConnectionStatus(connected) {
+    const statusIndicator = document.getElementById('activity-status');
+    if (statusIndicator) {
+        statusIndicator.className = connected ? 'status-connected' : 'status-disconnected';
+        statusIndicator.title = connected ? 'Connected' : 'Disconnected';
     }
 }
 
@@ -575,10 +629,42 @@ function showAlert(message, type = 'info') {
     `;
     alertDiv.style.display = 'flex';
     alertDiv.style.alignItems = 'center';
+    alertDiv.style.justifyContent = 'space-between';
+    alertDiv.style.padding = '10px';
+    alertDiv.style.margin = '10px 0';
+    alertDiv.style.borderRadius = '5px';
+    alertDiv.style.border = '1px solid';
+    
+    // Style based on type
+    switch (type) {
+        case 'success':
+            alertDiv.style.backgroundColor = '#d4edda';
+            alertDiv.style.color = '#155724';
+            alertDiv.style.borderColor = '#c3e6cb';
+            break;
+        case 'error':
+            alertDiv.style.backgroundColor = '#f8d7da';
+            alertDiv.style.color = '#721c24';
+            alertDiv.style.borderColor = '#f5c6cb';
+            break;
+        case 'warning':
+            alertDiv.style.backgroundColor = '#fff3cd';
+            alertDiv.style.color = '#856404';
+            alertDiv.style.borderColor = '#ffeaa7';
+            break;
+        default:
+            alertDiv.style.backgroundColor = '#d1ecf1';
+            alertDiv.style.color = '#0c5460';
+            alertDiv.style.borderColor = '#bee5eb';
+    }
     
     const container = document.querySelector('.container');
     const dashboardGrid = document.querySelector('.dashboard-grid');
-    container.insertBefore(alertDiv, dashboardGrid);
+    if (container && dashboardGrid) {
+        container.insertBefore(alertDiv, dashboardGrid);
+    } else {
+        document.body.appendChild(alertDiv);
+    }
     
     // Auto-remove after delay
     setTimeout(() => {
@@ -602,7 +688,6 @@ function hideLoading() {
 }
 
 function showModelDetails(modelName) {
-    // This would show detailed model information in a modal
     showAlert(`Detailed view for ${modelName} - Feature coming soon!`, 'info');
 }
 
@@ -613,5 +698,7 @@ function handleAsyncError(error, context = 'Operation') {
     hideLoading();
 }
 
-// Initialize WebSocket connection
-socket.connect();
+// Initialize WebSocket connection when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    socket.connect();
+});

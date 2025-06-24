@@ -122,20 +122,20 @@ class DataCleaner:
                 handled_columns[col] = f"Dropped {original_missing} rows with missing values"
                 
             elif strategy == 'mean' and df[col].dtype in ['int64', 'float64']:
-                mean_val = df[col].mean()
-                df[col].fillna(mean_val, inplace=True)
-                handled_columns[col] = f"Filled {original_missing} missing values with mean ({mean_val:.2f})"
+                fill_value = df[col].mean()
+                df[col].fillna(fill_value, inplace=True)
+                handled_columns[col] = f"Filled {original_missing} missing values with mean ({fill_value:.2f})"
                 
             elif strategy == 'median' and df[col].dtype in ['int64', 'float64']:
-                median_val = df[col].median()
-                df[col].fillna(median_val, inplace=True)
-                handled_columns[col] = f"Filled {original_missing} missing values with median ({median_val:.2f})"
+                fill_value = df[col].median()
+                df[col].fillna(fill_value, inplace=True)
+                handled_columns[col] = f"Filled {original_missing} missing values with median ({fill_value:.2f})"
                 
             elif strategy == 'mode':
                 if not df[col].mode().empty:
-                    mode_val = df[col].mode()[0]
-                    df[col].fillna(mode_val, inplace=True)
-                    handled_columns[col] = f"Filled {original_missing} missing values with mode ({mode_val})"
+                    fill_value = df[col].mode()[0]
+                    df[col].fillna(fill_value, inplace=True)
+                    handled_columns[col] = f"Filled {original_missing} missing values with mode ({fill_value})"
                 
             elif strategy == 'forward_fill':
                 df[col].fillna(method='ffill', inplace=True)
@@ -155,56 +155,43 @@ class DataCleaner:
     
     def encode_categorical_data(self, df, encoding_strategies):
         """
-        Encode categorical data according to specified strategies
+        Encode categorical columns
         
-        encoding_strategies: dict with column names as keys and encoding info as values
-        Possible encodings: 'label', 'onehot', 'ordinal'
+        encoding_strategies: dict with column names as keys and encoding type as values
+        Possible encodings: 'label', 'onehot'
         """
         encoded_columns = {}
         
-        for col, strategy_info in encoding_strategies.items():
+        for col, encoding_type in encoding_strategies.items():
             if col not in df.columns:
                 continue
                 
-            encoding_type = strategy_info.get('method', 'label')
-            
-            if encoding_type == 'label':
-                if df[col].dtype == 'object' or df[col].dtype.name == 'category':
+            if df[col].dtype == 'object':
+                if encoding_type == 'label':
                     le = LabelEncoder()
                     df[col] = le.fit_transform(df[col].astype(str))
-                    self.encoding_mappings[col] = dict(zip(le.classes_, le.transform(le.classes_)))
-                    encoded_columns[col] = f"Label encoded with {len(le.classes_)} categories"
+                    self.encoding_mappings[col] = le
+                    encoded_columns[col] = f"Label encoded (classes: {len(le.classes_)})"
                     
-            elif encoding_type == 'onehot':
-                if df[col].dtype == 'object' or df[col].dtype.name == 'category':
-                    # Create dummy variables
-                    dummies = pd.get_dummies(df[col], prefix=col, drop_first=True)
+                elif encoding_type == 'onehot':
+                    # One-hot encoding
+                    dummies = pd.get_dummies(df[col], prefix=col)
                     df = df.drop(columns=[col])
                     df = pd.concat([df, dummies], axis=1)
-                    encoded_columns[col] = f"One-hot encoded into {len(dummies.columns)} columns"
-                    
-            elif encoding_type == 'ordinal':
-                if df[col].dtype == 'object' or df[col].dtype.name == 'category':
-                    # Custom ordinal mapping if provided
-                    ordinal_mapping = strategy_info.get('mapping', {})
-                    if ordinal_mapping:
-                        df[col] = df[col].map(ordinal_mapping)
-                        encoded_columns[col] = f"Ordinal encoded with custom mapping"
-                    else:
-                        # Default ordinal encoding
-                        unique_vals = sorted(df[col].unique())
-                        ordinal_map = {val: idx for idx, val in enumerate(unique_vals)}
-                        df[col] = df[col].map(ordinal_map)
-                        encoded_columns[col] = f"Ordinal encoded with {len(unique_vals)} levels"
-            
-            self.cleaning_history.append(f"Encoded {col}: {encoded_columns.get(col, 'No encoding applied')}")
+                    encoded_columns[col] = f"One-hot encoded ({len(dummies.columns)} new columns)"
+                
+                self.cleaning_history.append(f"Encoded {col}: {encoded_columns.get(col, 'No encoding applied')}")
         
         return df, encoded_columns
     
     def detect_outliers(self, df, method='iqr', threshold=1.5):
-        """Detect outliers in numerical columns"""
-        outliers_info = {}
+        """
+        Detect outliers in numerical columns
         
+        method: 'iqr', 'zscore', 'isolation_forest'
+        threshold: threshold value for outlier detection
+        """
+        outliers_info = {}
         numerical_cols = df.select_dtypes(include=[np.number]).columns
         
         for col in numerical_cols:
@@ -216,7 +203,6 @@ class DataCleaner:
                 IQR = Q3 - Q1
                 lower_bound = Q1 - threshold * IQR
                 upper_bound = Q3 + threshold * IQR
-                
                 outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)].index.tolist()
                 
             elif method == 'zscore':
@@ -225,27 +211,27 @@ class DataCleaner:
             
             outliers_info[col] = {
                 'count': len(outliers),
-                'indices': outliers[:100],  # Limit to first 100 for display
+                'indices': outliers,
                 'percentage': len(outliers) / len(df) * 100
             }
         
         return outliers_info
     
     def remove_outliers(self, df, outlier_indices):
-        """Remove specified outlier indices"""
+        """Remove rows with outliers"""
         original_shape = df.shape
-        df_clean = df.drop(index=outlier_indices)
-        removed_count = original_shape[0] - df_clean.shape[0]
+        df_cleaned = df.drop(index=outlier_indices)
+        removed_count = original_shape[0] - df_cleaned.shape[0]
         
         self.cleaning_history.append(f"Removed {removed_count} outlier rows")
         
-        return df_clean, removed_count
+        return df_cleaned, removed_count
     
     def apply_transformations(self, df, transformations):
         """
-        Apply mathematical transformations to columns
+        Apply mathematical transformations to numerical columns
         
-        transformations: dict with column names and transformation types
+        transformations: dict with column names as keys and transformation type as values
         Possible transformations: 'log', 'sqrt', 'square', 'reciprocal', 'normalize'
         """
         transformed_columns = {}
@@ -258,12 +244,17 @@ class DataCleaner:
             
             try:
                 if transform_type == 'log':
-                    # Add small constant to handle zeros
-                    df[col] = np.log1p(df[col].clip(lower=0))
+                    # Handle negative values by adding offset
+                    min_val = df[col].min()
+                    if min_val <= 0:
+                        offset = abs(min_val) + 1
+                        df[col] = np.log(df[col] + offset)
+                    else:
+                        df[col] = np.log(df[col])
                     transformed_columns[col] = "Applied log transformation"
                     
                 elif transform_type == 'sqrt':
-                    df[col] = np.sqrt(df[col].clip(lower=0))
+                    df[col] = np.sqrt(np.abs(df[col]))
                     transformed_columns[col] = "Applied square root transformation"
                     
                 elif transform_type == 'square':
@@ -292,7 +283,8 @@ class DataCleaner:
             'operations_count': len(self.cleaning_history),
             'operations': self.cleaning_history,
             'column_mappings': self.column_mappings,
-            'encoding_mappings': self.encoding_mappings
+            'encoding_mappings': {k: v.classes_.tolist() if hasattr(v, 'classes_') else str(v) 
+                                for k, v in self.encoding_mappings.items()}
         }
     
     def save_cleaned_data(self, df, output_path):
