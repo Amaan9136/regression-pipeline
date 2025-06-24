@@ -23,9 +23,9 @@ from sklearn.compose import ColumnTransformer
 import warnings
 warnings.filterwarnings('ignore')
 
-class AdvancedRegressionPipeline:
+class RegressionPipeline:
     def __init__(self, config=None):
-        """Initialize the advanced regression pipeline with configurable parameters"""
+        """Initialize the regression pipeline with configurable parameters"""
         self.config = config or self._default_config()
         self.algorithms = self._initialize_algorithms()
         self.hyperparameters = self._initialize_hyperparameters()
@@ -82,7 +82,7 @@ class AdvancedRegressionPipeline:
         }
 
     def load_and_preprocess_data(self, file_path, target_column=None):
-        """Load and preprocess the dataset with advanced feature engineering"""
+        """Load and preprocess the dataset with feature engineering"""
         try:
             df = pd.read_csv(file_path)
             
@@ -310,7 +310,7 @@ class AdvancedRegressionPipeline:
         with open(filename, 'wb') as f:
             pickle.dump(model_data, f)
     
-    def generate_advanced_plots(self, dataset_name, progress_callback=None):
+    def generate_plots(self, dataset_name, progress_callback=None):
         """Generate comprehensive visualizations"""
         plots = {}
         

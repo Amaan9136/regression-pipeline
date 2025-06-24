@@ -1,6 +1,3 @@
-"""
-Enhanced Flask Backend with Real-time WebSocket Support and Advanced Features
-"""
 from flask import Flask, render_template, request, jsonify, send_file, Response
 from flask_socketio import SocketIO, emit
 import pandas as pd
@@ -15,8 +12,7 @@ import uuid
 from werkzeug.utils import secure_filename
 import logging
 
-# Import our enhanced modules
-from pipeline.regression_pipeline import AdvancedRegressionPipeline
+from pipeline.regression_pipeline import RegressionPipeline
 from utils.data_cleaning import DataCleaner, DataValidator
 
 app = Flask(__name__)
@@ -49,7 +45,7 @@ class BackendManager:
         """Create a new session for a user"""
         self.active_sessions[session_id] = {
             'created_at': datetime.now(),
-            'pipeline': AdvancedRegressionPipeline(),
+            'pipeline': RegressionPipeline(),
             'data_cleaner': DataCleaner(),
             'current_step': 'idle',
             'progress': 0
@@ -77,7 +73,7 @@ def index():
     datasets = []
     if os.path.exists('data'):
         datasets = [f for f in os.listdir('data') if f.endswith('.csv')]
-    return render_template('enhanced_index.html', datasets=datasets)
+    return render_template('index.html', datasets=datasets)
 
 @app.route('/api/preview_data', methods=['POST'])
 def preview_data():
@@ -302,7 +298,7 @@ def handle_training(data):
                 return
             
             # Initialize pipeline with custom config
-            pipeline = AdvancedRegressionPipeline(config)
+            pipeline = RegressionPipeline(config)
             
             # Progress callback for real-time updates
             def progress_callback(message, progress):
@@ -325,7 +321,7 @@ def handle_training(data):
             # Generate plots
             backend_manager.emit_progress(session_id, "Generating visualizations...", 90)
             dataset_name = dataset.replace('.csv', '')
-            plots = pipeline.generate_advanced_plots(dataset_name, progress_callback)
+            plots = pipeline.generate_plots(dataset_name, progress_callback)
             
             # Prepare results
             model_summary = pipeline.get_model_summary()
