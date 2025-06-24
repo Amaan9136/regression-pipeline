@@ -3,580 +3,697 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Regression Pipeline Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: #333;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-            color: white;
-        }
-
-        .header h1 {
-            font-size: 3rem;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .header p {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-
-        .card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-
-        .upload-section {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        .upload-card, .dataset-card {
-            background: linear-gradient(145deg, #f0f4f8, #e2e8f0);
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            border: 2px dashed #cbd5e0;
-            transition: all 0.3s ease;
-        }
-
-        .upload-card:hover, .dataset-card:hover {
-            border-color: #667eea;
-            transform: translateY(-5px);
-            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.2);
-        }
-
-        .file-input-wrapper {
-            position: relative;
-            display: inline-block;
-            cursor: pointer;
-            margin: 15px 0;
-        }
-
-        .file-input {
-            position: absolute;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
-            cursor: pointer;
-        }
-
-        .file-input-button {
-            display: inline-block;
-            padding: 12px 30px;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            border-radius: 25px;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            border: none;
-            cursor: pointer;
-        }
-
-        .file-input-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        .dataset-select {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e2e8f0;
-            border-radius: 10px;
-            font-size: 1rem;
-            margin: 15px 0;
-            background: white;
-        }
-
-        .train-button {
-            background: linear-gradient(45deg, #48bb78, #38a169);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            border-radius: 25px;
-            font-size: 1.1rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-        }
-
-        .train-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(72, 187, 120, 0.3);
-        }
-
-        .train-button:disabled {
-            background: #a0aec0;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 40px;
-        }
-
-        .loading-spinner {
-            width: 60px;
-            height: 60px;
-            border: 6px solid #e2e8f0;
-            border-top: 6px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .results {
-            display: none;
-        }
-
-        .results-header {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 30px;
-            text-align: center;
-        }
-
-        .results-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .metric-card {
-            background: linear-gradient(145deg, #f7fafc, #edf2f7);
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            border-left: 5px solid #667eea;
-        }
-
-        .metric-value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-
-        .metric-label {
-            color: #718096;
-            font-weight: 500;
-        }
-
-        .models-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-            background: white;
-            border-radius: 15px;
-            overflow: hidden;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-        }
-
-        .models-table th {
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            color: white;
-            padding: 15px;
-            text-align: left;
-            font-weight: bold;
-        }
-
-        .models-table td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #e2e8f0;
-        }
-
-        .models-table tr:hover {
-            background: #f7fafc;
-        }
-
-        .best-model {
-            background: linear-gradient(45deg, #48bb78, #38a169) !important;
-            color: white !important;
-        }
-
-        .plots-section {
-            margin-top: 40px;
-        }
-
-        .plots-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-        }
-
-        .plot-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-        }
-
-        .plot-card img {
-            width: 100%;
-            height: auto;
-            border-radius: 10px;
-        }
-
-        .plot-title {
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: #2d3748;
-            text-align: center;
-        }
-
-        .alert {
-            padding: 15px;
-            border-radius: 10px;
-            margin: 15px 0;
-            font-weight: 500;
-        }
-
-        .alert-success {
-            background: #c6f6d5;
-            color: #22543d;
-            border: 1px solid #9ae6b4;
-        }
-
-        .alert-error {
-            background: #fed7d7;
-            color: #742a2a;
-            border: 1px solid #fc8181;
-        }
-
-        .dataset-info {
-            background: #e6fffa;
-            border: 1px solid #81e6d9;
-            border-radius: 10px;
-            padding: 15px;
-            margin: 20px 0;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-
-        .info-item {
-            text-align: center;
-        }
-
-        .info-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #234e52;
-        }
-
-        .info-label {
-            color: #4a5568;
-            font-size: 0.9rem;
-        }
-
-        @media (max-width: 768px) {
-            .upload-section {
-                grid-template-columns: 1fr;
-            }
-            
-            .container {
-                padding: 10px;
-            }
-            
-            .header h1 {
-                font-size: 2rem;
-            }
-            
-            .plots-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <title>Advanced ML Pipeline Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.4/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 Regression Pipeline Dashboard</h1>
-            <p>Advanced Machine Learning Pipeline with Multiple Regression Algorithms</p>
+            <h1>🚀 Advanced ML Pipeline</h1>
+            <p>End-to-End Machine Learning with Real-time Monitoring & Data Cleaning</p>
         </div>
 
-        <div class="card">
-            <div class="upload-section">
-                <div class="upload-card">
-                    <h3>📁 Upload New Dataset</h3>
-                    <p>Upload your CSV file to get started</p>
-                    <div class="file-input-wrapper">
-                        <input type="file" id="file-upload" class="file-input" accept=".csv">
-                        <button class="file-input-button">Choose CSV File</button>
+        <div class="dashboard-grid">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- Data Upload Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            📁 Data Management
+                            <div class="status-indicator" id="upload-status"></div>
+                        </div>
                     </div>
-                    <div id="upload-status"></div>
+
+                    <div class="upload-zone" id="upload-zone">
+                        <input type="file" id="file-input" class="file-input" accept=".csv" multiple>
+                        <div class="upload-content">
+                            <div class="upload-icon">📊</div>
+                            <h3>Drop CSV files here or click to browse</h3>
+                            <p>Support for multiple files, up to 100MB each</p>
+                        </div>
+                    </div>
+
+                    <div id="file-list" class="file-list"></div>
+
+                    <div class="dataset-selection" style="margin-top: 20px;">
+                        <label for="dataset-select" style="display: block; margin-bottom: 10px; font-weight: 600;">Available Datasets:</label>
+                        <select id="dataset-select" class="select-field" style="width: 100%; margin-bottom: 15px;">
+                            <option value="">-- Select Dataset --</option>
+                            {% for dataset in datasets %}
+                            <option value="{{ dataset }}">{{ dataset }}</option>
+                            {% endfor %}
+                        </select>
+                        
+                        <div style="display: flex; gap: 10px;">
+                            <button id="clean-data-btn" class="btn btn-warning" disabled>
+                                🧹 Clean Data
+                            </button>
+                            <button id="train-models-btn" class="btn btn-success" disabled>
+                                🚀 Train Models
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="dataset-card">
-                    <h3>📊 Select Dataset</h3>
-                    <p>Choose from available datasets</p>
-                    <select id="dataset-select" class="dataset-select">
-                        <option value="">-- Select Dataset --</option>
-                        {% for dataset in datasets %}
-                        <option value="{{ dataset }}">{{ dataset }}</option>
-                        {% endfor %}
-                    </select>
-                    <button id="train-button" class="train-button" disabled>🚀 Train Models</button>
+                <!-- Real-time Activity Stream -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">
+                            📡 Live Activity Stream
+                            <div class="status-indicator" id="activity-status"></div>
+                        </div>
+                    </div>
+
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+                    </div>
+
+                    <div class="activity-stream" id="activity-stream">
+                        <div class="activity-item">
+                            <span class="activity-timestamp">--:--</span>
+                            <span class="activity-message">System ready. Upload data to begin.</span>
+                            <span class="activity-progress">0%</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div id="loading" class="loading">
-                <div class="loading-spinner"></div>
-                <h3>Training Models...</h3>
-                <p>This may take a few moments. Please wait while we train all regression algorithms.</p>
-            </div>
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Data Cleaning Interface -->
+                <div class="card cleaning-interface" id="cleaning-interface">
+                    <div class="card-header">
+                        <div class="card-title">🧹 Data Cleaning & Preprocessing</div>
+                        <button id="apply-cleaning-btn" class="btn btn-primary">Apply Changes</button>
+                    </div>
 
-            <div id="results" class="results">
-                <div class="results-header">
-                    <h2>🏆 Training Results</h2>
-                    <div id="dataset-info" class="dataset-info"></div>
+                    <div class="cleaning-tabs">
+                        <div class="tab active" data-tab="overview">Overview</div>
+                        <div class="tab" data-tab="columns">Columns</div>
+                        <div class="tab" data-tab="missing">Missing Values</div>
+                        <div class="tab" data-tab="encoding">Encoding</div>
+                        <div class="tab" data-tab="outliers">Outliers</div>
+                    </div>
+
+                    <div class="tab-content active" id="overview-tab">
+                        <div id="dataset-overview"></div>
+                    </div>
+
+                    <div class="tab-content" id="columns-tab">
+                        <div class="column-list" id="columns-list"></div>
+                    </div>
+
+                    <div class="tab-content" id="missing-tab">
+                        <div id="missing-values-content"></div>
+                    </div>
+
+                    <div class="tab-content" id="encoding-tab">
+                        <div id="encoding-content"></div>
+                    </div>
+
+                    <div class="tab-content" id="outliers-tab">
+                        <div id="outliers-content"></div>
+                    </div>
                 </div>
 
-                <div class="results-grid">
-                    <div class="metric-card">
-                        <div id="best-model-name" class="metric-value">-</div>
-                        <div class="metric-label">Best Model</div>
+                <!-- Training Results -->
+                <div class="card results-section" id="results-section">
+                    <div class="card-header">
+                        <div class="card-title">🏆 Training Results</div>
+                        <div>
+                            <button id="export-results-btn" class="btn btn-primary">📁 Export Results</button>
+                        </div>
                     </div>
-                    <div class="metric-card">
-                        <div id="best-model-score" class="metric-value">-</div>
-                        <div class="metric-label">Best R² Score</div>
-                    </div>
-                    <div class="metric-card">
-                        <div id="total-models" class="metric-value">-</div>
-                        <div class="metric-label">Models Trained</div>
-                    </div>
-                    <div class="metric-card">
-                        <div id="dataset-shape" class="metric-value">-</div>
-                        <div class="metric-label">Dataset Shape</div>
-                    </div>
-                </div>
 
-                <h3>📈 Model Performance Comparison</h3>
-                <table id="models-table" class="models-table">
-                    <thead>
-                        <tr>
-                            <th>Model</th>
-                            <th>R² Score</th>
-                            <th>MSE</th>
-                            <th>MAE</th>
-                            <th>RMSE</th>
-                        </tr>
-                    </thead>
-                    <tbody id="models-tbody">
-                    </tbody>
-                </table>
+                    <div class="metrics-grid" id="metrics-grid">
+                        <!-- Metrics will be populated dynamically -->
+                    </div>
 
-                <div class="plots-section">
-                    <h3>📊 Visualization & Analysis</h3>
-                    <div id="plots-container" class="plots-grid">
+                    <div class="models-comparison">
+                        <h3 style="margin-bottom: 20px;">📈 Model Performance Comparison</h3>
+                        <table class="models-table" id="models-table">
+                            <thead>
+                                <tr>
+                                    <th>Model</th>
+                                    <th>R² Score</th>
+                                    <th>MSE</th>
+                                    <th>MAE</th>
+                                    <th>RMSE</th>
+                                    <th>CV Score ±</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="models-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="viz-grid" id="visualization-grid">
+                        <!-- Visualizations will be populated dynamically -->
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <script>
-        const fileUpload = document.getElementById('file-upload');
-        const datasetSelect = document.getElementById('dataset-select');
-        const trainButton = document.getElementById('train-button');
-        const loading = document.getElementById('loading');
-        const results = document.getElementById('results');
-        const uploadStatus = document.getElementById('upload-status');
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <h3>Processing...</h3>
+            <p id="loading-message">Please wait while we process your request.</p>
+        </div>
+    </div>
 
-        // Enable train button when dataset is selected
-        datasetSelect.addEventListener('change', function() {
-            trainButton.disabled = !this.value;
+    <script>
+        // WebSocket connection for real-time updates
+        const socket = io();
+        let sessionId = null;
+        let currentDataset = null;
+        let cleaningOperations = {};
+
+        // Initialize application
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeEventListeners();
+            setupWebSocket();
         });
 
-        // File upload handler
-        fileUpload.addEventListener('change', function() {
-            const file = this.files[0];
-            if (file) {
-                const formData = new FormData();
-                formData.append('file', file);
+        function initializeEventListeners() {
+            // File upload
+            const fileInput = document.getElementById('file-input');
+            const uploadZone = document.getElementById('upload-zone');
+            const datasetSelect = document.getElementById('dataset-select');
+            
+            // Drag and drop functionality
+            uploadZone.addEventListener('dragover', handleDragOver);
+            uploadZone.addEventListener('dragleave', handleDragLeave);
+            uploadZone.addEventListener('drop', handleFileDrop);
+            uploadZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', handleFileSelect);
+            
+            // Dataset selection
+            datasetSelect.addEventListener('change', handleDatasetSelection);
+            
+            // Action buttons
+            document.getElementById('clean-data-btn').addEventListener('click', showCleaningInterface);
+            document.getElementById('train-models-btn').addEventListener('click', startTraining);
+            document.getElementById('apply-cleaning-btn').addEventListener('click', applyCleaningOperations);
+            
+            // Cleaning tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+            });
+        }
 
-                uploadStatus.innerHTML = '<div class="alert alert-info">Uploading...</div>';
+        function setupWebSocket() {
+            socket.on('session_created', (data) => {
+                sessionId = data.session_id;
+                addActivityLog('Session created successfully', 0);
+            });
 
-                fetch('/upload', {
+            socket.on('training_progress', (data) => {
+                updateProgress(data.progress, data.message);
+                addActivityLog(data.message, data.progress);
+                
+                if (data.data && data.progress === 100) {
+                    displayTrainingResults(data.data);
+                }
+            });
+
+            socket.on('training_error', (data) => {
+                showAlert('Training failed: ' + data.error, 'error');
+                hideLoading();
+            });
+        }
+
+        // File handling functions
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('dragover');
+        }
+
+        function handleFileDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            processFiles(files);
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            processFiles(files);
+        }
+
+        function processFiles(files) {
+            const csvFiles = files.filter(file => file.name.endsWith('.csv'));
+            
+            if (csvFiles.length === 0) {
+                showAlert('Please select CSV files only.', 'warning');
+                return;
+            }
+
+            csvFiles.forEach(file => uploadFile(file));
+        }
+
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                showLoading('Uploading ' + file.name + '...');
+                
+                const response = await fetch('/api/upload_dataset', {
                     method: 'POST',
                     body: formData
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        uploadStatus.innerHTML = '<div class="alert alert-success">✅ File uploaded successfully!</div>';
-                        // Add new dataset to select
-                        const option = document.createElement('option');
-                        option.value = file.name;
-                        option.textContent = file.name;
-                        datasetSelect.appendChild(option);
-                        datasetSelect.value = file.name;
-                        trainButton.disabled = false;
-                    } else {
-                        uploadStatus.innerHTML = `<div class="alert alert-error">❌ ${data.error}</div>`;
-                    }
-                })
-                .catch(error => {
-                    uploadStatus.innerHTML = `<div class="alert alert-error">❌ Upload failed: ${error.message}</div>`;
                 });
-            }
-        });
 
-        // Train button handler
-        trainButton.addEventListener('click', function() {
-            const selectedDataset = datasetSelect.value;
-            if (!selectedDataset) return;
-
-            // Show loading, hide results
-            loading.style.display = 'block';
-            results.style.display = 'none';
-            trainButton.disabled = true;
-
-            const formData = new FormData();
-            formData.append('dataset', selectedDataset);
-
-            fetch('/train', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                loading.style.display = 'none';
-                trainButton.disabled = false;
-
-                if (data.success) {
-                    displayResults(data);
-                    results.style.display = 'block';
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('File uploaded successfully: ' + file.name, 'success');
+                    addDatasetToSelect(result.file_info.filename);
+                    addActivityLog(`Uploaded: ${file.name}`, 100);
                 } else {
-                    alert(`Training failed: ${data.error}`);
+                    showAlert('Upload failed: ' + result.error, 'error');
                 }
-            })
-            .catch(error => {
-                loading.style.display = 'none';
-                trainButton.disabled = false;
-                alert(`Training failed: ${error.message}`);
-            });
-        });
+            } catch (error) {
+                showAlert('Upload error: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
 
-        function displayResults(data) {
-            // Update summary metrics
-            document.getElementById('best-model-name').textContent = data.best_model;
-            document.getElementById('best-model-score').textContent = data.best_score.toFixed(4);
-            document.getElementById('total-models').textContent = Object.keys(data.results).length;
-            document.getElementById('dataset-shape').textContent = `${data.dataset_info.shape[0]} × ${data.dataset_info.shape[1]}`;
-
-            // Update dataset info
-            const datasetInfo = document.getElementById('dataset-info');
-            datasetInfo.innerHTML = `
-                <div class="info-grid">
-                    <div class="info-item">
-                        <div class="info-value">${data.dataset_info.features.length}</div>
-                        <div class="info-label">Features</div>
+        function populateCleaningInterface(columnInfo, datasetShape) {
+            // Overview tab
+            const overviewContent = document.getElementById('dataset-overview');
+            overviewContent.innerHTML = `
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value">${datasetShape[0]}</div>
+                        <div class="metric-label">Rows</div>
                     </div>
-                    <div class="info-item">
-                        <div class="info-value">${data.dataset_info.target}</div>
-                        <div class="info-label">Target Variable</div>
+                    <div class="metric-card">
+                        <div class="metric-value">${datasetShape[1]}</div>
+                        <div class="metric-label">Columns</div>
                     </div>
-                    <div class="info-item">
-                        <div class="info-value">${data.dataset_info.shape[0].toLocaleString()}</div>
-                        <div class="info-label">Samples</div>
+                    <div class="metric-card">
+                        <div class="metric-value">${Object.values(columnInfo).reduce((sum, col) => sum + col.missing_count, 0)}</div>
+                        <div class="metric-label">Missing Values</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value">${Object.values(columnInfo).filter(col => col.dtype === 'object').length}</div>
+                        <div class="metric-label">Categorical Columns</div>
                     </div>
                 </div>
             `;
 
-            // Update models table
-            const tbody = document.getElementById('models-tbody');
-            tbody.innerHTML = '';
+            // Columns tab
+            const columnsList = document.getElementById('columns-list');
+            columnsList.innerHTML = Object.entries(columnInfo).map(([colName, info]) => `
+                <div class="column-item">
+                    <div class="column-info">
+                        <div class="column-name">${colName}</div>
+                        <div class="column-details">
+                            Type: ${info.dtype} | Missing: ${info.missing_count} (${info.missing_percentage.toFixed(1)}%) | 
+                            Unique: ${info.unique_values}
+                        </div>
+                    </div>
+                    <div class="column-actions">
+                        <input type="text" class="input-field" placeholder="Rename to..." 
+                               onchange="updateRename('${colName}', this.value)">
+                        <button class="btn btn-warning" onclick="markForDrop('${colName}')">Drop</button>
+                    </div>
+                </div>
+            `).join('');
+
+            // Missing values tab
+            populateMissingValuesTab(columnInfo);
             
-            Object.entries(data.results).forEach(([modelName, metrics]) => {
-                const row = document.createElement('tr');
-                if (modelName === data.best_model) {
-                    row.classList.add('best-model');
-                }
+            // Encoding tab
+            populateEncodingTab(columnInfo);
+        }
+
+        function populateMissingValuesTab(columnInfo) {
+            const missingContent = document.getElementById('missing-values-content');
+            const columnsWithMissing = Object.entries(columnInfo).filter(([_, info]) => info.missing_count > 0);
+            
+            if (columnsWithMissing.length === 0) {
+                missingContent.innerHTML = '<div class="alert alert-success">✅ No missing values detected!</div>';
+                return;
+            }
+
+            missingContent.innerHTML = `
+                <div class="alert alert-info">📊 ${columnsWithMissing.length} columns have missing values</div>
+                <div class="column-list">
+                    ${columnsWithMissing.map(([colName, info]) => `
+                        <div class="column-item">
+                            <div class="column-info">
+                                <div class="column-name">${colName}</div>
+                                <div class="column-details">
+                                    Missing: ${info.missing_count} values (${info.missing_percentage.toFixed(1)}%)
+                                </div>
+                            </div>
+                            <div class="column-actions">
+                                <select class="select-field" onchange="updateMissingStrategy('${colName}', this.value)">
+                                    <option value="">Choose strategy...</option>
+                                    <option value="drop">Drop rows</option>
+                                    ${info.dtype === 'object' ? '' : '<option value="mean">Fill with mean</option>'}
+                                    ${info.dtype === 'object' ? '' : '<option value="median">Fill with median</option>'}
+                                    <option value="mode">Fill with mode</option>
+                                    <option value="forward_fill">Forward fill</option>
+                                    <option value="custom_value">Custom value</option>
+                                </select>
+                                <input type="text" class="input-field" placeholder="Custom value" 
+                                       style="display: none;" id="custom-${colName}">
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function populateEncodingTab(columnInfo) {
+            const encodingContent = document.getElementById('encoding-content');
+            const categoricalColumns = Object.entries(columnInfo).filter(([_, info]) => info.dtype === 'object');
+            
+            if (categoricalColumns.length === 0) {
+                encodingContent.innerHTML = '<div class="alert alert-success">✅ No categorical columns detected!</div>';
+                return;
+            }
+
+            encodingContent.innerHTML = `
+                <div class="alert alert-info">🏷️ ${categoricalColumns.length} categorical columns need encoding</div>
+                <div class="column-list">
+                    ${categoricalColumns.map(([colName, info]) => `
+                        <div class="column-item">
+                            <div class="column-info">
+                                <div class="column-name">${colName}</div>
+                                <div class="column-details">
+                                    Unique values: ${info.unique_values} | 
+                                    Sample: ${info.sample_values.slice(0, 3).join(', ')}...
+                                </div>
+                            </div>
+                            <div class="column-actions">
+                                <select class="select-field" onchange="updateEncodingStrategy('${colName}', this.value)">
+                                    <option value="">Choose encoding...</option>
+                                    <option value="label">Label Encoding</option>
+                                    <option value="onehot">One-Hot Encoding</option>
+                                    <option value="ordinal">Ordinal Encoding</option>
+                                </select>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Cleaning operation handlers
+        function updateRename(columnName, newName) {
+            if (!cleaningOperations.rename_columns) cleaningOperations.rename_columns = {};
+            if (newName.trim()) {
+                cleaningOperations.rename_columns[columnName] = newName.trim();
+            } else {
+                delete cleaningOperations.rename_columns[columnName];
+            }
+        }
+
+        function markForDrop(columnName) {
+            if (!cleaningOperations.drop_columns) cleaningOperations.drop_columns = [];
+            if (!cleaningOperations.drop_columns.includes(columnName)) {
+                cleaningOperations.drop_columns.push(columnName);
+                showAlert(`Marked "${columnName}" for deletion`, 'info');
+            }
+        }
+
+        function updateMissingStrategy(columnName, strategy) {
+            if (!cleaningOperations.missing_values) cleaningOperations.missing_values = {};
+            
+            cleaningOperations.missing_values[columnName] = { method: strategy };
+            
+            // Show/hide custom value input
+            const customInput = document.getElementById(`custom-${columnName}`);
+            if (strategy === 'custom_value' && customInput) {
+                customInput.style.display = 'block';
+                customInput.onchange = (e) => {
+                    cleaningOperations.missing_values[columnName].value = e.target.value;
+                };
+            } else if (customInput) {
+                customInput.style.display = 'none';
+            }
+        }
+
+        function updateEncodingStrategy(columnName, strategy) {
+            if (!cleaningOperations.categorical_encoding) cleaningOperations.categorical_encoding = {};
+            cleaningOperations.categorical_encoding[columnName] = { method: strategy };
+        }
+
+        async function applyCleaningOperations() {
+            if (!currentDataset || Object.keys(cleaningOperations).length === 0) {
+                showAlert('No cleaning operations to apply', 'warning');
+                return;
+            }
+
+            try {
+                showLoading('Applying data cleaning operations...');
                 
-                row.innerHTML = `
-                    <td>${modelName}</td>
-                    <td>${metrics.r2.toFixed(4)}</td>
-                    <td>${metrics.mse.toFixed(4)}</td>
-                    <td>${metrics.mae.toFixed(4)}</td>
-                    <td>${metrics.rmse.toFixed(4)}</td>
-                `;
-                tbody.appendChild(row);
-            });
+                const response = await fetch('/api/apply_cleaning', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: currentDataset,
+                        operations: cleaningOperations
+                    })
+                });
 
-            // Update plots
-            const plotsContainer = document.getElementById('plots-container');
-            plotsContainer.innerHTML = '';
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(`Data cleaned successfully! New file: ${result.cleaned_filename}`, 'success');
+                    addDatasetToSelect(result.cleaned_filename);
+                    document.getElementById('dataset-select').value = result.cleaned_filename;
+                    currentDataset = result.cleaned_filename;
+                    addActivityLog(`Data cleaning completed`, 100);
+                    
+                    // Display cleaning summary
+                    displayCleaningSummary(result);
+                } else {
+                    showAlert('Cleaning failed: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showAlert('Cleaning error: ' + error.message, 'error');
+            } finally {
+                hideLoading();
+            }
+        }
 
-            const plotTitles = {
-                'comparison': '📊 Model Performance Comparison',
-                'best_scatter': '🎯 Best Model: Predicted vs Actual',
-                'heatmap': '🔥 Performance Metrics Heatmap'
+        function displayCleaningSummary(result) {
+            const summaryHtml = `
+                <div class="alert alert-success">
+                    <h4>🎉 Cleaning Summary</h4>
+                    <p><strong>Original shape:</strong> ${result.original_shape[0]} × ${result.original_shape[1]}</p>
+                    <p><strong>Final shape:</strong> ${result.final_shape[0]} × ${result.final_shape[1]}</p>
+                    <p><strong>Quality Score:</strong> ${result.quality_report.quality_score.toFixed(1)}/100</p>
+                    ${result.validation.is_valid ? 
+                        '<p>✅ Dataset is ready for training!</p>' : 
+                        '<p>⚠️ Dataset may need additional cleaning</p>'
+                    }
+                </div>
+            `;
+            
+            document.getElementById('overview-tab').innerHTML = summaryHtml + document.getElementById('overview-tab').innerHTML;
+        }
+
+        // Training functions
+        async function startTraining() {
+            if (!currentDataset || !sessionId) {
+                showAlert('Please select a dataset and ensure connection is established', 'warning');
+                return;
+            }
+
+            // Get training configuration
+            const config = {
+                test_size: 0.2,
+                cross_validation_folds: 5,
+                hyperparameter_tuning: true,
+                feature_engineering: true
             };
 
-            Object.entries(data.plots).forEach(([plotType, plotPath]) => {
-                const plotCard = document.createElement('div');
-                plotCard.className = 'plot-card';
-                plotCard.innerHTML = `
-                    <div class="plot-title">${plotTitles[plotType] || 'Analysis Plot'}</div>
-                    <img src="/${plotPath}" alt="${plotTitles[plotType]}" onerror="this.style.display='none'">
-                `;
-                plotsContainer.appendChild(plotCard);
+            addActivityLog('Starting model training...', 0);
+            document.getElementById('results-section').style.display = 'none';
+            
+            // Emit training start event
+            socket.emit('start_training', {
+                session_id: sessionId,
+                dataset: currentDataset,
+                config: config
             });
         }
 
-        // Update file input button text when file is selected
-        fileUpload.addEventListener('change', function() {
-            const button = document.querySelector('.file-input-button');
-            if (this.files.length > 0) {
-                button.textContent = `📄 ${this.files[0].name}`;
-            } else {
-                button.textContent = 'Choose CSV File';
+        function displayTrainingResults(data) {
+            const resultsSection = document.getElementById('results-section');
+            const modelSummary = data.model_summary;
+            
+            // Update metrics
+            updateMetricsGrid(modelSummary);
+            
+            // Update models table
+            updateModelsTable(modelSummary.model_results, modelSummary.best_model);
+            
+            // Update visualizations
+            updateVisualizationGrid(data.plots);
+            
+            resultsSection.style.display = 'block';
+            addActivityLog('Training results displayed', 100);
+        }
+
+        function updateMetricsGrid(summary) {
+            const metricsGrid = document.getElementById('metrics-grid');
+            metricsGrid.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-value">${summary.best_model}</div>
+                    <div class="metric-label">Best Model</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${summary.best_score.toFixed(4)}</div>
+                    <div class="metric-label">Best R² Score</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${summary.total_models}</div>
+                    <div class="metric-label">Models Trained</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${summary.data_info.processed_shape[0]}</div>
+                    <div class="metric-label">Training Samples</div>
+                </div>
+            `;
+        }
+
+        function updateModelsTable(modelResults, bestModel) {
+            const tbody = document.getElementById('models-tbody');
+            tbody.innerHTML = Object.entries(modelResults).map(([modelName, results]) => `
+                <tr class="${modelName === bestModel ? 'best-model-row' : ''}">
+                    <td><strong>${modelName}</strong></td>
+                    <td>${results.r2.toFixed(4)}</td>
+                    <td>${results.mse.toFixed(4)}</td>
+                    <td>${results.mae.toFixed(4)}</td>
+                    <td>${results.rmse.toFixed(4)}</td>
+                    <td>${results.cv_mean.toFixed(3)} ± ${results.cv_std.toFixed(3)}</td>
+                    <td>
+                        <button class="btn btn-primary" onclick="showModelDetails('${modelName}')">
+                            📊 Details
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateVisualizationGrid(plots) {
+            const vizGrid = document.getElementById('visualization-grid');
+            const plotTitles = {
+                'comparison': '📊 Model Performance Comparison',
+                'best_scatter': '🎯 Best Model: Predicted vs Actual',
+                'heatmap': '🔥 Performance Metrics Heatmap',
+                'residuals': '📈 Residual Analysis',
+                'feature_importance': '🔑 Feature Importance'
+            };
+
+            vizGrid.innerHTML = Object.entries(plots).map(([plotType, plotPath]) => `
+                <div class="viz-card">
+                    <div class="viz-title">${plotTitles[plotType] || 'Analysis Plot'}</div>
+                    <img src="/${plotPath}" alt="${plotTitles[plotType]}" 
+                         onerror="this.style.display='none'" loading="lazy">
+                </div>
+            `).join('');
+        }
+
+        // Utility functions
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.toggle('active', content.id === `${tabName}-tab`);
+            });
+        }
+
+        function updateProgress(progress, message) {
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.style.width = `${progress}%`;
+            
+            if (progress === 100) {
+                setTimeout(() => {
+                    progressBar.style.width = '0%';
+                }, 2000);
             }
-        });
+        }
+
+        function addActivityLog(message, progress) {
+            const activityStream = document.getElementById('activity-stream');
+            const timestamp = new Date().toLocaleTimeString();
+            
+            const activityItem = document.createElement('div');
+            activityItem.className = 'activity-item';
+            activityItem.innerHTML = `
+                <span class="activity-timestamp">${timestamp}</span>
+                <span class="activity-message">${message}</span>
+                <span class="activity-progress">${progress}%</span>
+            `;
+            
+            activityStream.insertBefore(activityItem, activityStream.firstChild);
+            
+            // Keep only last 20 items
+            while (activityStream.children.length > 20) {
+                activityStream.removeChild(activityStream.lastChild);
+            }
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `
+                <span>${message}</span>
+                <button style="margin-left: auto; background: none; border: none; font-size: 1.2rem; cursor: pointer;" 
+                        onclick="this.parentElement.remove()">×</button>
+            `;
+            alertDiv.style.display = 'flex';
+            alertDiv.style.alignItems = 'center';
+            
+            document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.dashboard-grid'));
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (alertDiv.parentElement) {
+                    alertDiv.remove();
+                }
+            }, 5000);
+        }
+
+        function showLoading(message = 'Processing...') {
+            document.getElementById('loading-message').textContent = message;
+            document.getElementById('loading-overlay').style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+
+        function showModelDetails(modelName) {
+            // This would show detailed model information in a modal
+            showAlert(`Detailed view for ${modelName} - Feature coming soon!`, 'info');
+        }
+
+        // Initialize WebSocket connection
+        socket.connect();
     </script>
 </body>
 </html>
