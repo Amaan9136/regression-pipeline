@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Regression Pipeline Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .upload-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .upload-card, .dataset-card {
+            background: linear-gradient(145deg, #f0f4f8, #e2e8f0);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            border: 2px dashed #cbd5e0;
+            transition: all 0.3s ease;
+        }
+
+        .upload-card:hover, .dataset-card:hover {
+            border-color: #667eea;
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.2);
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+            margin: 15px 0;
+        }
+
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-input-button {
+            display: inline-block;
+            padding: 12px 30px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border-radius: 25px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .file-input-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .dataset-select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            margin: 15px 0;
+            background: white;
+        }
+
+        .train-button {
+            background: linear-gradient(45deg, #48bb78, #38a169);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 25px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+
+        .train-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(72, 187, 120, 0.3);
+        }
+
+        .train-button:disabled {
+            background: #a0aec0;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid #e2e8f0;
+            border-top: 6px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results {
+            display: none;
+        }
+
+        .results-header {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: linear-gradient(145deg, #f7fafc, #edf2f7);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            border-left: 5px solid #667eea;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            color: #718096;
+            font-weight: 500;
+        }
+
+        .models-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .models-table th {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        .models-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .models-table tr:hover {
+            background: #f7fafc;
+        }
+
+        .best-model {
+            background: linear-gradient(45deg, #48bb78, #38a169) !important;
+            color: white !important;
+        }
+
+        .plots-section {
+            margin-top: 40px;
+        }
+
+        .plots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+        }
+
+        .plot-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .plot-card img {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+
+        .plot-title {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #2d3748;
+            text-align: center;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: #c6f6d5;
+            color: #22543d;
+            border: 1px solid #9ae6b4;
+        }
+
+        .alert-error {
+            background: #fed7d7;
+            color: #742a2a;
+            border: 1px solid #fc8181;
+        }
+
+        .dataset-info {
+            background: #e6fffa;
+            border: 1px solid #81e6d9;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .info-item {
+            text-align: center;
+        }
+
+        .info-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #234e52;
+        }
+
+        .info-label {
+            color: #4a5568;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .upload-section {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .plots-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Regression Pipeline Dashboard</h1>
+            <p>Advanced Machine Learning Pipeline with Multiple Regression Algorithms</p>
+        </div>
+
+        <div class="card">
+            <div class="upload-section">
+                <div class="upload-card">
+                    <h3>📁 Upload New Dataset</h3>
+                    <p>Upload your CSV file to get started</p>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="file-upload" class="file-input" accept=".csv">
+                        <button class="file-input-button">Choose CSV File</button>
+                    </div>
+                    <div id="upload-status"></div>
+                </div>
+
+                <div class="dataset-card">
+                    <h3>📊 Select Dataset</h3>
+                    <p>Choose from available datasets</p>
+                    <select id="dataset-select" class="dataset-select">
+                        <option value="">-- Select Dataset --</option>
+                        {% for dataset in datasets %}
+                        <option value="{{ dataset }}">{{ dataset }}</option>
+                        {% endfor %}
+                    </select>
+                    <button id="train-button" class="train-button" disabled>🚀 Train Models</button>
+                </div>
+            </div>
+
+            <div id="loading" class="loading">
+                <div class="loading-spinner"></div>
+                <h3>Training Models...</h3>
+                <p>This may take a few moments. Please wait while we train all regression algorithms.</p>
+            </div>
+
+            <div id="results" class="results">
+                <div class="results-header">
+                    <h2>🏆 Training Results</h2>
+                    <div id="dataset-info" class="dataset-info"></div>
+                </div>
+
+                <div class="results-grid">
+                    <div class="metric-card">
+                        <div id="best-model-name" class="metric-value">-</div>
+                        <div class="metric-label">Best Model</div>
+                    </div>
+                    <div class="metric-card">
+                        <div id="best-model-score" class="metric-value">-</div>
+                        <div class="metric-label">Best R² Score</div>
+                    </div>
+                    <div class="metric-card">
+                        <div id="total-models" class="metric-value">-</div>
+                        <div class="metric-label">Models Trained</div>
+                    </div>
+                    <div class="metric-card">
+                        <div id="dataset-shape" class="metric-value">-</div>
+                        <div class="metric-label">Dataset Shape</div>
+                    </div>
+                </div>
+
+                <h3>📈 Model Performance Comparison</h3>
+                <table id="models-table" class="models-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>R² Score</th>
+                            <th>MSE</th>
+                            <th>MAE</th>
+                            <th>RMSE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="models-tbody">
+                    </tbody>
+                </table>
+
+                <div class="plots-section">
+                    <h3>📊 Visualization & Analysis</h3>
+                    <div id="plots-container" class="plots-grid">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileUpload = document.getElementById('file-upload');
+        const datasetSelect = document.getElementById('dataset-select');
+        const trainButton = document.getElementById('train-button');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const uploadStatus = document.getElementById('upload-status');
+
+        // Enable train button when dataset is selected
+        datasetSelect.addEventListener('change', function() {
+            trainButton.disabled = !this.value;
+        });
+
+        // File upload handler
+        fileUpload.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                uploadStatus.innerHTML = '<div class="alert alert-info">Uploading...</div>';
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        uploadStatus.innerHTML = '<div class="alert alert-success">✅ File uploaded successfully!</div>';
+                        // Add new dataset to select
+                        const option = document.createElement('option');
+                        option.value = file.name;
+                        option.textContent = file.name;
+                        datasetSelect.appendChild(option);
+                        datasetSelect.value = file.name;
+                        trainButton.disabled = false;
+                    } else {
+                        uploadStatus.innerHTML = `<div class="alert alert-error">❌ ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    uploadStatus.innerHTML = `<div class="alert alert-error">❌ Upload failed: ${error.message}</div>`;
+                });
+            }
+        });
+
+        // Train button handler
+        trainButton.addEventListener('click', function() {
+            const selectedDataset = datasetSelect.value;
+            if (!selectedDataset) return;
+
+            // Show loading, hide results
+            loading.style.display = 'block';
+            results.style.display = 'none';
+            trainButton.disabled = true;
+
+            const formData = new FormData();
+            formData.append('dataset', selectedDataset);
+
+            fetch('/train', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loading.style.display = 'none';
+                trainButton.disabled = false;
+
+                if (data.success) {
+                    displayResults(data);
+                    results.style.display = 'block';
+                } else {
+                    alert(`Training failed: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                loading.style.display = 'none';
+                trainButton.disabled = false;
+                alert(`Training failed: ${error.message}`);
+            });
+        });
+
+        function displayResults(data) {
+            // Update summary metrics
+            document.getElementById('best-model-name').textContent = data.best_model;
+            document.getElementById('best-model-score').textContent = data.best_score.toFixed(4);
+            document.getElementById('total-models').textContent = Object.keys(data.results).length;
+            document.getElementById('dataset-shape').textContent = `${data.dataset_info.shape[0]} × ${data.dataset_info.shape[1]}`;
+
+            // Update dataset info
+            const datasetInfo = document.getElementById('dataset-info');
+            datasetInfo.innerHTML = `
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-value">${data.dataset_info.features.length}</div>
+                        <div class="info-label">Features</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-value">${data.dataset_info.target}</div>
+                        <div class="info-label">Target Variable</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-value">${data.dataset_info.shape[0].toLocaleString()}</div>
+                        <div class="info-label">Samples</div>
+                    </div>
+                </div>
+            `;
+
+            // Update models table
+            const tbody = document.getElementById('models-tbody');
+            tbody.innerHTML = '';
+            
+            Object.entries(data.results).forEach(([modelName, metrics]) => {
+                const row = document.createElement('tr');
+                if (modelName === data.best_model) {
+                    row.classList.add('best-model');
+                }
+                
+                row.innerHTML = `
+                    <td>${modelName}</td>
+                    <td>${metrics.r2.toFixed(4)}</td>
+                    <td>${metrics.mse.toFixed(4)}</td>
+                    <td>${metrics.mae.toFixed(4)}</td>
+                    <td>${metrics.rmse.toFixed(4)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            // Update plots
+            const plotsContainer = document.getElementById('plots-container');
+            plotsContainer.innerHTML = '';
+
+            const plotTitles = {
+                'comparison': '📊 Model Performance Comparison',
+                'best_scatter': '🎯 Best Model: Predicted vs Actual',
+                'heatmap': '🔥 Performance Metrics Heatmap'
+            };
+
+            Object.entries(data.plots).forEach(([plotType, plotPath]) => {
+                const plotCard = document.createElement('div');
+                plotCard.className = 'plot-card';
+                plotCard.innerHTML = `
+                    <div class="plot-title">${plotTitles[plotType] || 'Analysis Plot'}</div>
+                    <img src="/${plotPath}" alt="${plotTitles[plotType]}" onerror="this.style.display='none'">
+                `;
+                plotsContainer.appendChild(plotCard);
+            });
+        }
+
+        // Update file input button text when file is selected
+        fileUpload.addEventListener('change', function() {
+            const button = document.querySelector('.file-input-button');
+            if (this.files.length > 0) {
+                button.textContent = `📄 ${this.files[0].name}`;
+            } else {
+                button.textContent = 'Choose CSV File';
+            }
+        });
+    </script>
+</body>
+</html>
