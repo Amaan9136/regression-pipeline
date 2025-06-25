@@ -1,3 +1,4 @@
 models/
 plots/
 __pycache__/
+.DS_Store

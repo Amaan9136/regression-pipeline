@@ -3,167 +3,353 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ML Pipeline Dashboard</title>
+    <title>Advanced ML Regression Pipeline</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>ML Pipeline Dashboard</h1>
-            <p>End-to-End Machine Learning with Real-time Monitoring & Data Cleaning</p>
-        </div>
-
-        <div class="dashboard-grid">
-            <!-- Sidebar -->
-            <div class="sidebar">
-                <!-- Data Upload Card -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">
-                            📁 Data Management
-                            <div class="status-indicator" id="upload-status"></div>
-                        </div>
-                    </div>
-
-                    <div class="upload-zone" id="upload-zone">
-                        <input type="file" id="file-input" class="file-input" accept=".csv" multiple>
-                        <div class="upload-content">
-                            <div class="upload-icon">📊</div>
-                            <h3>Drop CSV files here or click to browse</h3>
-                            <p>Support for multiple files, up to 100MB each</p>
-                        </div>
-                    </div>
-
-                    <div id="file-list" class="file-list"></div>
-
-                    <div class="dataset-selection">
-                        <label for="dataset-select" class="form-label">Available Datasets:</label>
-                        <select id="dataset-select" class="form-select">
-                            <option value="">-- Select Dataset --</option>
-                            {% for dataset in datasets %}
-                            <option value="{{ dataset }}">{{ dataset }}</option>
-                            {% endfor %}
-                        </select>
-                        
-                        <div class="action-buttons">
-                            <button id="clean-data-btn" class="btn btn-warning">
-                                🧹 Clean Data
-                            </button>
-                            <button id="train-models-btn" class="btn btn-success">
-                                🚀 Train Models
-                            </button>
-                        </div>
-                    </div>
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo-section">
+                    <h1>🚀 Advanced ML Pipeline</h1>
+                    <p>Complete Regression Analysis & Model Training Platform</p>
                 </div>
-
-                <!-- Real-time Activity Stream -->
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">
-                            📡 Live Activity Stream
-                            <div class="status-indicator" id="activity-status"></div>
-                        </div>
+                <div class="header-stats">
+                    <div class="stat-card">
+                        <span class="stat-number" id="active-sessions">0</span>
+                        <span class="stat-label">Active Sessions</span>
                     </div>
-
-                    <div class="progress-container">
-                        <div class="progress-bar" id="progress-bar"></div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="models-trained">0</span>
+                        <span class="stat-label">Models Trained</span>
                     </div>
-
-                    <div class="activity-stream" id="activity-stream">
-                        <div class="activity-item">
-                            <span class="activity-timestamp">--:--</span>
-                            <span class="activity-message">System ready. Upload data to begin.</span>
-                            <span class="activity-progress">0%</span>
-                        </div>
+                    <div class="stat-card">
+                        <span class="stat-number" id="datasets-processed">0</span>
+                        <span class="stat-label">Datasets</span>
                     </div>
                 </div>
             </div>
+        </header>
 
-            <!-- Main Content -->
-            <div class="main-content">
-                <!-- Data Cleaning Interface -->
-                <div class="card cleaning-interface" id="cleaning-interface">
-                    <div class="card-header">
-                        <div class="card-title">🧹 Data Cleaning & Preprocessing</div>
-                        <button id="apply-cleaning-btn" class="btn btn-primary">Apply Changes</button>
-                    </div>
+        <!-- Navigation -->
+        <nav class="navigation">
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-section="upload">📁 Data Upload</button>
+                <button class="nav-tab" data-section="preprocessing">🧹 Data Cleaning</button>
+                <button class="nav-tab" data-section="training">🚀 Model Training</button>
+                <button class="nav-tab" data-section="results">📊 Results & Analytics</button>
+                <button class="nav-tab" data-section="prediction">🎯 Prediction</button>
+            </div>
+        </nav>
 
-                    <div class="cleaning-tabs">
-                        <div class="tab active" data-tab="overview">Overview</div>
-                        <div class="tab" data-tab="columns">Columns</div>
-                        <div class="tab" data-tab="missing">Missing Values</div>
-                        <div class="tab" data-tab="encoding">Encoding</div>
-                        <div class="tab" data-tab="outliers">Outliers</div>
-                    </div>
-
-                    <div class="tab-content active" id="overview-tab">
-                        <div id="dataset-overview"></div>
-                    </div>
-
-                    <div class="tab-content" id="columns-tab">
-                        <div class="column-list" id="columns-list"></div>
-                    </div>
-
-                    <div class="tab-content" id="missing-tab">
-                        <div id="missing-values-content"></div>
-                    </div>
-
-                    <div class="tab-content" id="encoding-tab">
-                        <div id="encoding-content"></div>
-                    </div>
-
-                    <div class="tab-content" id="outliers-tab">
-                        <div id="outliers-content"></div>
+        <!-- Main Dashboard -->
+        <div class="dashboard">
+            <!-- Upload Section -->
+            <section class="section active" id="upload-section">
+                <div class="section-header">
+                    <h2>Data Upload & Management</h2>
+                    <div class="section-actions">
+                        <button id="refresh-datasets" class="btn btn-secondary">🔄 Refresh</button>
                     </div>
                 </div>
 
-                <!-- Training Results -->
-                <div class="card results-section" id="results-section">
-                    <div class="card-header">
-                        <div class="card-title">🏆 Training Results</div>
-                        <div>
-                            <button id="export-results-btn" class="btn btn-primary">📁 Export Results</button>
+                <div class="upload-area">
+                    <div class="upload-zone" id="upload-zone">
+                        <input type="file" id="file-input" accept=".csv" multiple>
+                        <div class="upload-content">
+                            <div class="upload-icon">📊</div>
+                            <h3>Drop CSV files here or click to browse</h3>
+                            <p>Support for multiple files, maximum 100MB each</p>
+                            <div class="upload-features">
+                                <span class="feature">✓ Auto-detection</span>
+                                <span class="feature">✓ Data validation</span>
+                                <span class="feature">✓ Preview generation</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="metrics-grid" id="metrics-grid">
-                        <!-- Metrics will be populated dynamically -->
+                    <div class="file-list" id="file-list"></div>
+                </div>
+
+                <div class="dataset-selector">
+                    <label for="dataset-select">Select Dataset for Analysis:</label>
+                    <div class="select-wrapper">
+                        <select id="dataset-select">
+                            <option value="">-- Choose Dataset --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="dataset-preview" id="dataset-preview"></div>
+            </section>
+
+            <!-- Preprocessing Section -->
+            <section class="section" id="preprocessing-section">
+                <div class="section-header">
+                    <h2>Data Preprocessing & Cleaning</h2>
+                    <div class="section-actions">
+                        <button id="auto-clean" class="btn btn-primary">🤖 Auto Clean</button>
+                        <button id="apply-cleaning" class="btn btn-success">✅ Apply Changes</button>
+                    </div>
+                </div>
+
+                <div class="preprocessing-tabs">
+                    <div class="tab-nav">
+                        <button class="tab-btn active" data-tab="overview">📋 Overview</button>
+                        <button class="tab-btn" data-tab="columns">📊 Columns</button>
+                        <button class="tab-btn" data-tab="missing">❓ Missing Values</button>
+                        <button class="tab-btn" data-tab="outliers">🎯 Outliers</button>
+                        <button class="tab-btn" data-tab="encoding">🔤 Encoding</button>
+                        <button class="tab-btn" data-tab="scaling">📏 Scaling</button>
                     </div>
 
-                    <div class="models-comparison">
-                        <h3>📈 Model Performance Comparison</h3>
-                        <table class="models-table" id="models-table">
+                    <div class="tab-content active" id="overview-tab">
+                        <div class="data-overview" id="data-overview"></div>
+                    </div>
+
+                    <div class="tab-content" id="columns-tab">
+                        <div class="columns-management" id="columns-management"></div>
+                    </div>
+
+                    <div class="tab-content" id="missing-tab">
+                        <div class="missing-values-handler" id="missing-values-handler"></div>
+                    </div>
+
+                    <div class="tab-content" id="outliers-tab">
+                        <div class="outliers-detector" id="outliers-detector"></div>
+                    </div>
+
+                    <div class="tab-content" id="encoding-tab">
+                        <div class="encoding-options" id="encoding-options"></div>
+                    </div>
+
+                    <div class="tab-content" id="scaling-tab">
+                        <div class="scaling-options" id="scaling-options"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Training Section -->
+            <section class="section" id="training-section">
+                <div class="section-header">
+                    <h2>Model Training & Configuration</h2>
+                    <div class="section-actions">
+                        <button id="start-training" class="btn btn-primary">🚀 Start Training</button>
+                        <button id="stop-training" class="btn btn-danger" style="display: none;">⏹️ Stop</button>
+                    </div>
+                </div>
+
+                <div class="training-config">
+                    <div class="config-groups">
+                        <div class="config-group">
+                            <h3>📊 Data Split Configuration</h3>
+                            <div class="config-row">
+                                <label>Test Size:</label>
+                                <input type="range" id="test-size" min="0.1" max="0.5" step="0.05" value="0.2">
+                                <span id="test-size-value">20%</span>
+                            </div>
+                            <div class="config-row">
+                                <label>Random State:</label>
+                                <input type="number" id="random-state" value="42" min="1" max="1000">
+                            </div>
+                        </div>
+
+                        <div class="config-group">
+                            <h3>🔬 Model Configuration</h3>
+                            <div class="config-row">
+                                <label>Cross Validation Folds:</label>
+                                <input type="number" id="cv-folds" value="5" min="3" max="10">
+                            </div>
+                            <div class="config-row checkbox-row">
+                                <input type="checkbox" id="hyperparameter-tuning" checked>
+                                <label for="hyperparameter-tuning">Enable Hyperparameter Tuning</label>
+                            </div>
+                            <div class="config-row checkbox-row">
+                                <input type="checkbox" id="feature-engineering" checked>
+                                <label for="feature-engineering">Apply Feature Engineering</label>
+                            </div>
+                        </div>
+
+                        <div class="config-group">
+                            <h3>⚙️ Preprocessing Options</h3>
+                            <div class="config-row">
+                                <label>Scaling Method:</label>
+                                <select id="scaling-method">
+                                    <option value="standard">Standard Scaler</option>
+                                    <option value="robust">Robust Scaler</option>
+                                    <option value="minmax">MinMax Scaler</option>
+                                </select>
+                            </div>
+                            <div class="config-row">
+                                <label>Feature Selection:</label>
+                                <select id="feature-selection">
+                                    <option value="all">Use All Features</option>
+                                    <option value="5">Top 5 Features</option>
+                                    <option value="10">Top 10 Features</option>
+                                    <option value="15">Top 15 Features</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="training-progress" id="training-progress">
+                    <div class="progress-header">
+                        <h3>Training Progress</h3>
+                        <span class="progress-percentage" id="progress-percentage">0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <div class="progress-status" id="progress-status">Ready to start training...</div>
+                </div>
+
+                <div class="live-activity" id="live-activity">
+                    <h3>📡 Live Training Activity</h3>
+                    <div class="activity-stream" id="activity-stream"></div>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="section" id="results-section">
+                <div class="section-header">
+                    <h2>Training Results & Model Analytics</h2>
+                    <div class="section-actions">
+                        <button id="export-results" class="btn btn-primary">📥 Export Results</button>
+                        <button id="save-models" class="btn btn-success">💾 Save Models</button>
+                    </div>
+                </div>
+
+                <div class="results-overview" id="results-overview">
+                    <div class="metrics-grid" id="metrics-grid"></div>
+                </div>
+
+                <div class="model-comparison" id="model-comparison">
+                    <h3>🏆 Model Performance Comparison</h3>
+                    <div class="comparison-table-container">
+                        <table class="comparison-table" id="comparison-table">
                             <thead>
                                 <tr>
                                     <th>Model</th>
                                     <th>R² Score</th>
-                                    <th>MSE</th>
-                                    <th>MAE</th>
                                     <th>RMSE</th>
-                                    <th>CV Score ±</th>
+                                    <th>MAE</th>
+                                    <th>CV Score</th>
+                                    <th>Training Time</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="models-tbody">
-                            </tbody>
+                            <tbody id="comparison-tbody"></tbody>
                         </table>
                     </div>
+                </div>
 
-                    <div class="viz-grid" id="visualization-grid">
-                        <!-- Visualizations will be populated dynamically -->
+                <div class="visualizations" id="visualizations">
+                    <h3>📈 Model Visualizations</h3>
+                    <div class="viz-grid" id="viz-grid"></div>
+                </div>
+
+                <div class="feature-importance" id="feature-importance">
+                    <h3>🎯 Feature Importance Analysis</h3>
+                    <div class="feature-charts" id="feature-charts"></div>
+                </div>
+            </section>
+
+            <!-- Prediction Section -->
+            <section class="section" id="prediction-section">
+                <div class="section-header">
+                    <h2>Model Prediction Interface</h2>
+                    <div class="section-actions">
+                        <button id="load-model" class="btn btn-secondary">📂 Load Model</button>
+                        <button id="batch-predict" class="btn btn-primary">📊 Batch Predict</button>
                     </div>
+                </div>
+
+                <div class="prediction-interface">
+                    <div class="model-selector">
+                        <label>Select Model for Prediction:</label>
+                        <select id="prediction-model-select">
+                            <option value="">-- Choose Trained Model --</option>
+                        </select>
+                    </div>
+
+                    <div class="prediction-input">
+                        <h3>Input Features</h3>
+                        <div class="feature-inputs" id="feature-inputs"></div>
+                        <button id="make-prediction" class="btn btn-success">🎯 Predict</button>
+                    </div>
+
+                    <div class="prediction-results" id="prediction-results"></div>
+
+                    <div class="batch-prediction">
+                        <h3>Batch Prediction</h3>
+                        <div class="batch-upload">
+                            <input type="file" id="batch-file" accept=".csv">
+                            <label for="batch-file">Upload CSV for batch prediction</label>
+                        </div>
+                        <div class="batch-results" id="batch-results"></div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Side Panel -->
+        <div class="side-panel" id="side-panel">
+            <div class="panel-header">
+                <h3>System Status</h3>
+                <button class="panel-toggle" id="panel-toggle">◀</button>
+            </div>
+
+            <div class="panel-content">
+                <div class="health-status">
+                    <h4>🏥 Health Check</h4>
+                    <div class="health-indicator" id="health-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Checking...</span>
+                    </div>
+                </div>
+
+                <div class="session-info">
+                    <h4>📱 Session Info</h4>
+                    <div class="session-details">
+                        <p>Session ID: <span id="session-id">-</span></p>
+                        <p>Connected: <span id="connection-status">No</span></p>
+                        <p>Uptime: <span id="uptime">0s</span></p>
+                    </div>
+                </div>
+
+                <div class="recent-activity">
+                    <h4>🕒 Recent Activity</h4>
+                    <div class="activity-list" id="activity-list"></div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loading-overlay">
-        <div class="loading-content">
-            <div class="spinner"></div>
-            <h3>Processing...</h3>
-            <p id="loading-message">Please wait while we process your request.</p>
+        <!-- Modals -->
+        <div class="modal" id="model-details-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Model Details</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" id="model-details-body"></div>
+            </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="notifications" id="notifications"></div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loading-overlay">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <h3 id="loading-title">Processing...</h3>
+                <p id="loading-message">Please wait while we process your request.</p>
+            </div>
         </div>
     </div>
 
