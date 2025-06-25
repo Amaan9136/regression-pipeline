@@ -30,7 +30,6 @@ for dir_name in ['data', 'models', 'static/plots', 'temp']:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Custom JSON encoder to handle numpy/pandas dtypes
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -39,8 +38,12 @@ class CustomJSONEncoder(json.JSONEncoder):
             return float(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
-        elif hasattr(obj, 'dtype'):  # Handle pandas dtypes
+        elif hasattr(obj, 'dtype'):
             return str(obj)
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
         return super().default(obj)
 
 app.json_encoder = CustomJSONEncoder
@@ -195,7 +198,7 @@ def handle_training(data):
         'random_state': 42,
         'cross_validation_folds': 5,
         'feature_selection_k': 'all',
-        'scaling_method': 'standard',  # Fix for missing scaling_method
+        'scaling_method': 'standard',
         'hyperparameter_tuning': True,
         'feature_engineering': True,
         'model_evaluation_metrics': ['r2', 'mse', 'mae', 'rmse', 'explained_variance']
@@ -371,14 +374,11 @@ def detect_outliers(filename):
             return jsonify({'error': 'File not found'}), 404
         
         df = pd.read_csv(file_path)
-        method = request.args.get('method', 'iqr')
-        threshold = float(request.args.get('threshold', 1.5))
-        
-        outliers_info = backend_manager.data_cleaner.detect_outliers(df, method, threshold)
+        outliers = backend_manager.data_cleaner.detect_outliers(df)
         
         return jsonify({
             'success': True,
-            'outliers': outliers_info
+            'outliers': outliers
         })
         
     except Exception as e:
@@ -391,25 +391,21 @@ def make_prediction():
     try:
         data = request.get_json()
         model_name = data.get('model_name')
-        features = data.get('features')
+        features = data.get('features', {})
         
-        if not model_name or not features:
-            return jsonify({'error': 'Model name and features are required'}), 400
-        
-        # Load model
-        model_file = f"models/{model_name.replace(' ', '_').lower()}_model.pkl"
-        
-        if not os.path.exists(model_file):
+        model_path = os.path.join('models', f'{model_name}.pkl')
+        if not os.path.exists(model_path):
             return jsonify({'error': 'Model not found'}), 404
         
-        with open(model_file, 'rb') as f:
+        with open(model_path, 'rb') as f:
             model_data = pickle.load(f)
         
         model = model_data['model']
         scaler = model_data.get('scaler')
+        feature_names = model_data.get('feature_names', [])
         
-        # Prepare features for prediction
-        feature_array = np.array(list(features.values())).reshape(1, -1)
+        # Prepare feature array
+        feature_array = np.array([[features.get(name, 0) for name in feature_names]])
         
         # Scale features if scaler exists
         if scaler:
@@ -476,5 +472,4 @@ def internal_error(e):
     return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    # Run with SocketIO support
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)

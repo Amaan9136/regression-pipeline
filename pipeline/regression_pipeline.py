@@ -65,63 +65,33 @@ class RegressionPipeline:
         return merged_config
     
     def _initialize_algorithms(self):
-        """Initialize machine learning algorithms"""
+        """Initialize regression algorithms"""
         return {
             'Linear Regression': LinearRegression(),
-            'Ridge Regression': Ridge(random_state=self.config['random_state']),
-            'Lasso Regression': Lasso(random_state=self.config['random_state']),
-            'Elastic Net': ElasticNet(random_state=self.config['random_state']),
-            'Random Forest': RandomForestRegressor(
-                n_estimators=100, 
-                random_state=self.config['random_state'],
-                n_jobs=-1
-            ),
-            'Gradient Boosting': GradientBoostingRegressor(
-                n_estimators=100,
-                random_state=self.config['random_state']
-            ),
-            'Extra Trees': ExtraTreesRegressor(
-                n_estimators=100,
-                random_state=self.config['random_state'],
-                n_jobs=-1
-            ),
-            'Support Vector Regression': SVR(),
+            'Ridge Regression': Ridge(),
+            'Lasso Regression': Lasso(),
+            'ElasticNet': ElasticNet(),
+            'Random Forest': RandomForestRegressor(random_state=self.config['random_state']),
+            'Gradient Boosting': GradientBoostingRegressor(random_state=self.config['random_state']),
+            'Extra Trees': ExtraTreesRegressor(random_state=self.config['random_state']),
             'Decision Tree': DecisionTreeRegressor(random_state=self.config['random_state']),
-            'K-Nearest Neighbors': KNeighborsRegressor()
+            'K-Neighbors': KNeighborsRegressor(),
+            'Support Vector': SVR()
         }
     
     def _initialize_hyperparameters(self):
         """Initialize hyperparameter grids for tuning"""
         return {
-            'Ridge Regression': {
-                'alpha': [0.1, 1.0, 10.0, 100.0]
-            },
-            'Lasso Regression': {
-                'alpha': [0.1, 1.0, 10.0, 100.0]
-            },
-            'Elastic Net': {
-                'alpha': [0.1, 1.0, 10.0],
-                'l1_ratio': [0.1, 0.5, 0.9]
-            },
-            'Random Forest': {
-                'n_estimators': [50, 100, 200],
-                'max_depth': [None, 10, 20],
-                'min_samples_split': [2, 5, 10]
-            },
-            'Gradient Boosting': {
-                'n_estimators': [50, 100, 200],
-                'learning_rate': [0.01, 0.1, 0.2],
-                'max_depth': [3, 5, 7]
-            },
-            'Support Vector Regression': {
-                'C': [0.1, 1, 10],
-                'gamma': ['scale', 'auto'],
-                'kernel': ['rbf', 'linear']
-            },
-            'K-Nearest Neighbors': {
-                'n_neighbors': [3, 5, 7, 10],
-                'weights': ['uniform', 'distance']
-            }
+            'Linear Regression': {},
+            'Ridge Regression': {'alpha': [0.1, 1.0, 10.0, 100.0]},
+            'Lasso Regression': {'alpha': [0.1, 1.0, 10.0, 100.0]},
+            'ElasticNet': {'alpha': [0.1, 1.0, 10.0], 'l1_ratio': [0.1, 0.5, 0.9]},
+            'Random Forest': {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
+            'Gradient Boosting': {'n_estimators': [50, 100, 200], 'learning_rate': [0.01, 0.1, 0.2]},
+            'Extra Trees': {'n_estimators': [50, 100, 200], 'max_depth': [None, 10, 20]},
+            'Decision Tree': {'max_depth': [None, 10, 20, 30], 'min_samples_split': [2, 5, 10]},
+            'K-Neighbors': {'n_neighbors': [3, 5, 7, 9], 'weights': ['uniform', 'distance']},
+            'Support Vector': {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf'], 'gamma': ['scale', 'auto']}
         }
     
     def load_and_preprocess_data(self, file_path):
@@ -179,171 +149,49 @@ class RegressionPipeline:
             print(f"After handling missing values: {df.shape}")
             
             # Separate features and target
-            target_column = self._identify_target_column(df)
-            print(f"Using '{target_column}' as target column")
+            target_columns = ['compressive_strength', 'target', 'y', 'strength']
+            target_col = None
             
-            # Separate features and target
-            X = df.drop(columns=[target_column])
-            y = df[target_column]
+            # Find target column
+            for col in target_columns:
+                if col in df.columns:
+                    target_col = col
+                    break
             
-            # Validate target variable for regression
-            y = self._validate_and_prepare_target(y)
-            
-            print(f"Features shape: {X.shape}, Target shape: {y.shape}")
-            
-            # Apply feature engineering if enabled
-            if self.config['feature_engineering']:
-                print("Applying feature engineering...")
-                X = self._apply_feature_engineering(X)
-                print(f"After feature engineering: {X.shape}")
+            if target_col is None:
+                # Use last column as target
+                target_col = df.columns[-1]
+                print(f"No standard target column found, using last column: {target_col}")
             
             # Encode categorical variables
-            X, self.categorical_encoders = self._encode_categorical_variables(X)
-            print(f"After encoding: {X.shape}")
+            categorical_cols = df.select_dtypes(include=['object']).columns
+            for col in categorical_cols:
+                if col != target_col:
+                    le = LabelEncoder()
+                    df[col] = le.fit_transform(df[col].astype(str))
+                    self.categorical_encoders[col] = le
             
-            # Ensure all features are numeric
-            X = self._ensure_numeric_features(X)
+            # Separate features and target
+            X = df.drop(columns=[target_col])
+            y = df[target_col]
             
-            print(f"Final data shapes - X: {X.shape}, y: {y.shape}")
+            # Encode target if categorical
+            if y.dtype == 'object':
+                self.target_encoder = LabelEncoder()
+                y = self.target_encoder.fit_transform(y)
+            
+            print(f"Features shape: {X.shape}")
+            print(f"Target shape: {y.shape}")
+            print(f"Feature columns: {list(X.columns)}")
             
             return X, y, df
             
         except Exception as e:
-            print(f"Error loading/preprocessing data: {str(e)}")
+            print(f"Error loading data: {str(e)}")
             return None, None, None
     
-    def _identify_target_column(self, df):
-        """Identify the target column from the dataframe"""
-        target_column = None
-        
-        # Look for common target names
-        common_targets = [
-            'target', 'label', 'y', 'price', 'value', 'output', 'strength',
-            'compressive_strength', 'tensile_strength', 'youngs_modulus'
-        ]
-        
-        for col in common_targets:
-            if col in df.columns:
-                target_column = col
-                break
-        
-        # If not found, use the last column
-        if target_column is None:
-            target_column = df.columns[-1]
-        
-        return target_column
-    
-    def _validate_and_prepare_target(self, y):
-        """Validate and prepare target variable for regression"""
-        # Handle string targets (convert to numeric if possible)
-        if y.dtype == 'object':
-            print("Target variable is categorical, attempting to convert to numeric...")
-            try:
-                # Try to convert to numeric
-                y_numeric = pd.to_numeric(y, errors='coerce')
-                
-                # If conversion successful (no NaN values)
-                if not y_numeric.isnull().any():
-                    print("Successfully converted target to numeric")
-                    return y_numeric
-                else:
-                    # Encode categorical target
-                    print("Encoding categorical target variable...")
-                    self.target_encoder = LabelEncoder()
-                    y_encoded = self.target_encoder.fit_transform(y.astype(str))
-                    print(f"Encoded {len(self.target_encoder.classes_)} categories")
-                    return pd.Series(y_encoded, index=y.index)
-            except:
-                # Fallback to label encoding
-                print("Encoding categorical target variable...")
-                self.target_encoder = LabelEncoder()
-                y_encoded = self.target_encoder.fit_transform(y.astype(str))
-                print(f"Encoded {len(self.target_encoder.classes_)} categories")
-                return pd.Series(y_encoded, index=y.index)
-        
-        # Convert to float to ensure consistency
-        return y.astype(float)
-    
-    def _ensure_numeric_features(self, X):
-        """Ensure all features are numeric"""
-        for col in X.columns:
-            if X[col].dtype == 'object':
-                try:
-                    X[col] = pd.to_numeric(X[col], errors='coerce')
-                    X[col].fillna(X[col].median(), inplace=True)
-                except:
-                    # If conversion fails, use label encoding
-                    le = LabelEncoder()
-                    X[col] = le.fit_transform(X[col].astype(str))
-                    if col not in self.categorical_encoders:
-                        self.categorical_encoders[col] = le
-        
-        return X.astype(float)
-    
-    def _apply_feature_engineering(self, X):
-        """Apply feature engineering techniques"""
-        X_engineered = X.copy()
-        
-        # Get numerical columns
-        numerical_cols = X.select_dtypes(include=[np.number]).columns.tolist()
-        print(f"Found {len(numerical_cols)} numerical columns for feature engineering")
-        
-        # Create interaction features for first few numerical columns
-        for i, col1 in enumerate(numerical_cols[:3]):
-            for col2 in numerical_cols[i+1:3]:
-                if col1 != col2:
-                    feature_name = f'{col1}_x_{col2}'
-                    X_engineered[feature_name] = X_engineered[col1] * X_engineered[col2]
-                    print(f"Created interaction feature: {feature_name}")
-        
-        # Create polynomial features for first few numerical columns
-        for col in numerical_cols[:3]:
-            if X_engineered[col].var() > 0:  # Only if column has variance
-                # Square feature
-                feature_name = f'{col}_squared'
-                X_engineered[feature_name] = X_engineered[col] ** 2
-                
-                # Square root feature (handle negative values)
-                feature_name = f'{col}_sqrt'
-                X_engineered[feature_name] = np.sqrt(np.abs(X_engineered[col]))
-                
-                print(f"Created polynomial features for: {col}")
-        
-        # Log transform for highly skewed features
-        for col in numerical_cols:
-            try:
-                skewness = X_engineered[col].skew()
-                if abs(skewness) > 2 and (X_engineered[col] > 0).all():
-                    feature_name = f'{col}_log'
-                    X_engineered[feature_name] = np.log1p(X_engineered[col])
-                    print(f"Created log feature for skewed column {col} (skewness: {skewness:.2f})")
-            except:
-                continue
-        
-        return X_engineered
-    
-    def _encode_categorical_variables(self, X):
-        """Encode categorical variables"""
-        categorical_encoders = {}
-        X_encoded = X.copy()
-        
-        categorical_cols = X.select_dtypes(include=['object']).columns
-        print(f"Found {len(categorical_cols)} categorical columns to encode")
-        
-        for col in categorical_cols:
-            print(f"Encoding categorical column: {col}")
-            le = LabelEncoder()
-            X_encoded[col] = le.fit_transform(X[col].astype(str))
-            categorical_encoders[col] = le
-            print(f"  - {col}: {len(le.classes_)} unique categories")
-        
-        return X_encoded, categorical_encoders
-    
-    def _setup_preprocessing(self, X):
-        """Setup preprocessing pipeline"""
-        print(f"Setting up preprocessing with scaling method: {self.config['scaling_method']}")
-        
-        # Initialize scaler based on config
+    def _scale_features(self, X_train, X_test):
+        """Scale features based on configuration"""
         if self.config['scaling_method'] == 'standard':
             self.scaler = StandardScaler()
         elif self.config['scaling_method'] == 'robust':
@@ -352,213 +200,171 @@ class RegressionPipeline:
             self.scaler = MinMaxScaler()
         else:
             self.scaler = StandardScaler()  # Default fallback
-            print(f"Unknown scaling method '{self.config['scaling_method']}', using StandardScaler")
         
-        # Setup feature selection
-        if self.config['feature_selection_k'] != 'all':
-            k = min(self.config['feature_selection_k'], X.shape[1])
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_test_scaled = self.scaler.transform(X_test)
+        
+        return X_train_scaled, X_test_scaled
+    
+    def _select_features(self, X_train, y_train, X_test):
+        """Select best features if configured"""
+        if self.config['feature_selection_k'] == 'all':
+            return X_train, X_test
+        
+        try:
+            k = int(self.config['feature_selection_k'])
+            if k >= X_train.shape[1]:
+                return X_train, X_test
+            
             self.feature_selector = SelectKBest(score_func=f_regression, k=k)
-            print(f"Feature selection enabled: selecting top {k} features")
-        else:
-            self.feature_selector = None
-            print("No feature selection applied")
-    
-    def _preprocess_features(self, X, fit=False, y_train=None):
-        """Apply preprocessing to features"""
-        if fit:
-            X_processed = self.scaler.fit_transform(X)
-            if self.feature_selector:
-                X_processed = self.feature_selector.fit_transform(X_processed, y_train)
-        else:
-            X_processed = self.scaler.transform(X)
-            if self.feature_selector:
-                X_processed = self.feature_selector.transform(X_processed)
-        
-        return X_processed
-    
-    def _calculate_metrics(self, y_train, y_pred_train, y_test, y_pred_test):
-        """Calculate comprehensive evaluation metrics"""
-        metrics = {}
-        
-        # Training metrics
-        metrics['r2_train'] = r2_score(y_train, y_pred_train)
-        metrics['mse_train'] = mean_squared_error(y_train, y_pred_train)
-        metrics['mae_train'] = mean_absolute_error(y_train, y_pred_train)
-        metrics['rmse_train'] = np.sqrt(metrics['mse_train'])
-        
-        # Test metrics
-        metrics['r2_test'] = r2_score(y_test, y_pred_test)
-        metrics['mse_test'] = mean_squared_error(y_test, y_pred_test)
-        metrics['mae_test'] = mean_absolute_error(y_test, y_pred_test)
-        metrics['rmse_test'] = np.sqrt(metrics['mse_test'])
-        
-        # Overall metrics (using test performance)
-        metrics['r2'] = metrics['r2_test']
-        metrics['mse'] = metrics['mse_test']
-        metrics['mae'] = metrics['mae_test']
-        metrics['rmse'] = metrics['rmse_test']
-        metrics['explained_variance'] = explained_variance_score(y_test, y_pred_test)
-        
-        return metrics
+            X_train_selected = self.feature_selector.fit_transform(X_train, y_train)
+            X_test_selected = self.feature_selector.transform(X_test)
+            
+            print(f"Selected {k} best features out of {X_train.shape[1]}")
+            return X_train_selected, X_test_selected
+            
+        except (ValueError, TypeError):
+            print(f"Invalid feature_selection_k: {self.config['feature_selection_k']}, using all features")
+            return X_train, X_test
     
     def train_models(self, X, y, progress_callback=None):
-        """Train all regression models with hyperparameter tuning"""
-        print(f"Starting model training with {len(self.algorithms)} algorithms")
-        
-        # Setup preprocessing
-        self._setup_preprocessing(X)
+        """Train all models and evaluate performance"""
+        print("Starting model training...")
         
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=self.config['test_size'], 
+            X, y, 
+            test_size=self.config['test_size'], 
             random_state=self.config['random_state']
         )
         
-        print(f"Data split - Train: {X_train.shape}, Test: {X_test.shape}")
+        # Scale features
+        X_train_scaled, X_test_scaled = self._scale_features(X_train, X_test)
         
-        # Preprocessing
-        X_train_processed = self._preprocess_features(X_train, fit=True, y_train=y_train)
-        X_test_processed = self._preprocess_features(X_test, fit=False)
-        
-        print(f"After preprocessing - Train: {X_train_processed.shape}, Test: {X_test_processed.shape}")
+        # Feature selection
+        X_train_final, X_test_final = self._select_features(X_train_scaled, y_train, X_test_scaled)
         
         total_models = len(self.algorithms)
         
         for idx, (name, algorithm) in enumerate(self.algorithms.items()):
             try:
-                print(f"\nTraining {name} ({idx+1}/{total_models})...")
                 if progress_callback:
-                    progress_callback(f"Training {name}...", (idx / total_models) * 80 + 10)
+                    progress = 15 + (idx / total_models) * 75  # 15% to 90%
+                    progress_callback(f"Training {name}...", progress)
                 
-                # Hyperparameter tuning if enabled and hyperparameters exist
+                print(f"Training {name}...")
+                
+                # Hyperparameter tuning if enabled
                 if self.config['hyperparameter_tuning'] and name in self.hyperparameters:
-                    print(f"  - Performing hyperparameter tuning...")
-                    grid_search = GridSearchCV(
-                        algorithm, 
-                        self.hyperparameters[name],
-                        cv=self.config['cross_validation_folds'],
-                        scoring='r2',
-                        n_jobs=-1,
-                        verbose=0
-                    )
-                    grid_search.fit(X_train_processed, y_train)
-                    best_model = grid_search.best_estimator_
-                    best_params = grid_search.best_params_
-                    print(f"  - Best parameters: {best_params}")
+                    param_grid = self.hyperparameters[name]
+                    if param_grid:  # Only if there are parameters to tune
+                        grid_search = GridSearchCV(
+                            algorithm, param_grid, 
+                            cv=self.config['cross_validation_folds'],
+                            scoring='r2',
+                            n_jobs=-1
+                        )
+                        grid_search.fit(X_train_final, y_train)
+                        best_model = grid_search.best_estimator_
+                        print(f"  Best parameters: {grid_search.best_params_}")
+                    else:
+                        best_model = algorithm
+                        best_model.fit(X_train_final, y_train)
                 else:
-                    print(f"  - Training with default parameters...")
                     best_model = algorithm
-                    best_params = {}
-                    best_model.fit(X_train_processed, y_train)
+                    best_model.fit(X_train_final, y_train)
+                
+                # Store trained model
+                self.trained_models[name] = best_model
                 
                 # Make predictions
-                y_pred_train = best_model.predict(X_train_processed)
-                y_pred_test = best_model.predict(X_test_processed)
+                y_pred = best_model.predict(X_test_final)
                 
                 # Calculate metrics
-                metrics = self._calculate_metrics(y_train, y_pred_train, y_test, y_pred_test)
+                metrics = self._calculate_metrics(y_test, y_pred)
                 
                 # Cross-validation score
-                try:
-                    cv_scores = cross_val_score(
-                        best_model, X_train_processed, y_train, 
-                        cv=self.config['cross_validation_folds'], 
-                        scoring='r2',
-                        n_jobs=-1
-                    )
-                    metrics['cv_score'] = cv_scores.mean()
-                    metrics['cv_std'] = cv_scores.std()
-                except:
-                    metrics['cv_score'] = np.nan
-                    metrics['cv_std'] = np.nan
+                cv_scores = cross_val_score(
+                    best_model, X_train_final, y_train, 
+                    cv=self.config['cross_validation_folds'], 
+                    scoring='r2'
+                )
+                metrics['cv_mean'] = cv_scores.mean()
+                metrics['cv_std'] = cv_scores.std()
                 
-                print(f"  - R² Score: {metrics['r2']:.4f}")
-                print(f"  - RMSE: {metrics['rmse']:.4f}")
-                if not np.isnan(metrics['cv_score']):
-                    print(f"  - CV Score: {metrics['cv_score']:.4f} ± {metrics['cv_std']:.4f}")
-                
-                # Store results
                 self.results[name] = metrics
-                self.trained_models[name] = {
-                    'model': best_model,
-                    'params': best_params,
-                    'metrics': metrics
-                }
                 
-                # Update best model
+                # Track best model
                 if metrics['r2'] > self.best_score:
                     self.best_score = metrics['r2']
-                    self.best_model = name
-                    print(f"  - New best model: {name}")
+                    self.best_model = best_model
                 
-                # Save model
-                self._save_model(name, best_model, best_params)
+                print(f"  R² Score: {metrics['r2']:.4f}")
+                print(f"  RMSE: {metrics['rmse']:.4f}")
                 
             except Exception as e:
-                error_msg = f"Error training {name}: {str(e)}"
-                print(f"  - {error_msg}")
-                if progress_callback:
-                    progress_callback(error_msg, (idx / total_models) * 80 + 10)
+                print(f"Error training {name}: {str(e)}")
+                continue
         
-        print(f"\nTraining completed!")
-        print(f"Best model: {self.best_model} (R² = {self.best_score:.4f})")
+        print(f"\nBest model: {self._get_best_model_name()} (R² = {self.best_score:.4f})")
+        
+        # Save models
+        self._save_models()
     
-    def _save_model(self, name, model, params):
-        """Save trained model with metadata"""
-        model_data = {
-            'model': model,
-            'scaler': self.scaler,
-            'feature_selector': self.feature_selector,
-            'categorical_encoders': self.categorical_encoders,
-            'target_encoder': self.target_encoder,
-            'config': self.config,
-            'params': params,
-            'timestamp': datetime.now().isoformat()
+    def _calculate_metrics(self, y_true, y_pred):
+        """Calculate regression metrics"""
+        return {
+            'r2': r2_score(y_true, y_pred),
+            'mse': mean_squared_error(y_true, y_pred),
+            'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+            'mae': mean_absolute_error(y_true, y_pred),
+            'explained_variance': explained_variance_score(y_true, y_pred)
         }
+    
+    def _get_best_model_name(self):
+        """Get the name of the best performing model"""
+        if not self.results:
+            return "None"
         
-        try:
-            os.makedirs('models', exist_ok=True)
-            model_filename = f"models/{name.replace(' ', '_').lower()}_model.pkl"
-            with open(model_filename, 'wb') as f:
-                pickle.dump(model_data, f)
-            print(f"  - Model saved: {model_filename}")
-        except Exception as e:
-            print(f"  - Error saving model: {str(e)}")
+        best_name = max(self.results.keys(), key=lambda x: self.results[x]['r2'])
+        return best_name
     
     def get_model_summary(self):
-        """Get summary of all trained models"""
-        return self.results
+        """Get summary of all model results"""
+        return self.results.copy()
     
-    def get_best_model(self):
-        """Get the best performing model"""
-        if self.best_model and self.best_model in self.trained_models:
-            return self.trained_models[self.best_model]
-        return None
-    
-    def predict(self, X, model_name=None):
-        """Make predictions using a specific model or the best model"""
-        if model_name is None:
-            model_name = self.best_model
+    def _save_models(self):
+        """Save trained models to disk"""
+        models_dir = 'models'
+        os.makedirs(models_dir, exist_ok=True)
         
-        if model_name not in self.trained_models:
-            raise ValueError(f"Model '{model_name}' not found")
-        
-        model = self.trained_models[model_name]['model']
-        
-        # Preprocess features
-        X_processed = self._preprocess_features(X, fit=False)
-        
-        # Make predictions
-        predictions = model.predict(X_processed)
-        
-        # Inverse transform if target was encoded
-        if self.target_encoder:
-            predictions = self.target_encoder.inverse_transform(predictions.astype(int))
-        
-        return predictions
+        for name, model in self.trained_models.items():
+            try:
+                model_data = {
+                    'model': model,
+                    'scaler': self.scaler,
+                    'feature_selector': self.feature_selector,
+                    'categorical_encoders': self.categorical_encoders,
+                    'target_encoder': self.target_encoder,
+                    'feature_names': list(self.data_info.get('columns', [])),
+                    'metrics': self.results.get(name, {}),
+                    'config': self.config,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                filename = f"{name.replace(' ', '_').lower()}.pkl"
+                filepath = os.path.join(models_dir, filename)
+                
+                with open(filepath, 'wb') as f:
+                    pickle.dump(model_data, f)
+                
+                print(f"Saved {name} model to {filepath}")
+                
+            except Exception as e:
+                print(f"Error saving {name} model: {str(e)}")
     
     def save_pipeline(self, filepath):
-        """Save the entire pipeline"""
+        """Save entire pipeline"""
         pipeline_data = {
             'config': self.config,
             'results': self.results,
@@ -613,53 +419,125 @@ class RegressionPipeline:
         try:
             plt.figure(figsize=(12, 8))
             
-            if plot_type == 'comparison':
-                # Model comparison bar plot
+            if plot_type == 'comparison' and self.results:
+                # Model performance comparison
                 models = list(self.results.keys())
                 r2_scores = [self.results[model]['r2'] for model in models]
+                rmse_scores = [self.results[model]['rmse'] for model in models]
                 
-                colors = plt.cm.viridis(np.linspace(0, 1, len(models)))
-                bars = plt.bar(models, r2_scores, color=colors)
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
                 
-                plt.title('Model Performance Comparison (R² Score)', fontsize=16, fontweight='bold')
-                plt.ylabel('R² Score', fontsize=12)
-                plt.xlabel('Models', fontsize=12)
-                plt.xticks(rotation=45, ha='right')
+                # R² scores
+                bars1 = ax1.bar(models, r2_scores, color='skyblue', alpha=0.7)
+                ax1.set_title('R² Score Comparison', fontsize=14, fontweight='bold')
+                ax1.set_ylabel('R² Score')
+                ax1.tick_params(axis='x', rotation=45)
+                ax1.grid(axis='y', alpha=0.3)
                 
                 # Add value labels on bars
-                for bar, score in zip(bars, r2_scores):
-                    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                for bar, score in zip(bars1, r2_scores):
+                    ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
                             f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
                 
-                plt.grid(axis='y', alpha=0.3)
+                # RMSE scores
+                bars2 = ax2.bar(models, rmse_scores, color='lightcoral', alpha=0.7)
+                ax2.set_title('RMSE Comparison', fontsize=14, fontweight='bold')
+                ax2.set_ylabel('RMSE')
+                ax2.tick_params(axis='x', rotation=45)
+                ax2.grid(axis='y', alpha=0.3)
+                
+                # Add value labels on bars
+                for bar, score in zip(bars2, rmse_scores):
+                    ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(rmse_scores)*0.01,
+                            f'{score:.3f}', ha='center', va='bottom', fontweight='bold')
+                
                 plt.tight_layout()
                 
-            elif plot_type == 'heatmap':
+            elif plot_type == 'heatmap' and self.results:
                 # Performance metrics heatmap
                 metrics_data = []
-                model_names = []
+                models = list(self.results.keys())
+                metrics = ['r2', 'mse', 'mae', 'rmse', 'explained_variance']
                 
-                for model in self.results:
-                    metrics_data.append([
-                        self.results[model]['r2'],
-                        self.results[model]['mse'],
-                        self.results[model]['mae'],
-                        self.results[model]['rmse']
-                    ])
-                    model_names.append(model)
+                for model in models:
+                    row = []
+                    for metric in metrics:
+                        if metric in self.results[model]:
+                            row.append(self.results[model][metric])
+                        else:
+                            row.append(0)
+                    metrics_data.append(row)
                 
-                df_metrics = pd.DataFrame(
-                    metrics_data,
-                    index=model_names,
-                    columns=['R²', 'MSE', 'MAE', 'RMSE']
-                )
+                df_heatmap = pd.DataFrame(metrics_data, index=models, columns=metrics)
                 
-                sns.heatmap(df_metrics, annot=True, cmap='viridis', fmt='.3f', 
-                           cbar_kws={'label': 'Metric Value'})
-                plt.title('Performance Metrics Heatmap', fontsize=16, fontweight='bold')
-                plt.ylabel('Models', fontsize=12)
-                plt.xlabel('Metrics', fontsize=12)
+                # Normalize data for better visualization
+                df_normalized = df_heatmap.copy()
+                for col in df_normalized.columns:
+                    if col in ['mse', 'mae', 'rmse']:  # Lower is better
+                        df_normalized[col] = 1 - (df_normalized[col] / df_normalized[col].max())
+                
+                sns.heatmap(df_normalized, annot=True, cmap='RdYlBu_r', 
+                           cbar_kws={'label': 'Normalized Performance'}, fmt='.3f')
+                plt.title('Model Performance Heatmap', fontsize=16, fontweight='bold')
+                plt.ylabel('Models')
+                plt.xlabel('Metrics')
                 plt.tight_layout()
+                
+            elif plot_type == 'best_scatter' and self.best_model is not None:
+                # Scatter plot for best model (simulated since we don't have test data here)
+                # This would ideally use actual predictions vs true values
+                plt.text(0.5, 0.5, f'Best Model: {self._get_best_model_name()}\n'
+                                   f'R² Score: {self.best_score:.4f}\n\n'
+                                   f'Scatter plot would show\nPredicted vs Actual values\n'
+                                   f'when test predictions are available',
+                        ha='center', va='center', transform=plt.gca().transAxes,
+                        fontsize=14, bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.7))
+                plt.title(f'{self._get_best_model_name()}: Performance Visualization', 
+                         fontsize=16, fontweight='bold')
+                plt.axis('off')
+                
+            elif plot_type == 'residuals' and self.best_model is not None:
+                # Residuals plot placeholder
+                plt.text(0.5, 0.5, f'Residual Analysis\n{self._get_best_model_name()}\n\n'
+                                   f'This plot would show:\n'
+                                   f'• Residuals vs Predicted values\n'
+                                   f'• Distribution of residuals\n'
+                                   f'• Model diagnostic information',
+                        ha='center', va='center', transform=plt.gca().transAxes,
+                        fontsize=14, bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.7))
+                plt.title('Residual Analysis', fontsize=16, fontweight='bold')
+                plt.axis('off')
+                
+            elif plot_type == 'feature_importance' and self.best_model is not None:
+                # Feature importance plot
+                best_model_name = self._get_best_model_name()
+                best_model = self.trained_models.get(best_model_name)
+                
+                if hasattr(best_model, 'feature_importances_'):
+                    importances = best_model.feature_importances_
+                    feature_names = [f'Feature_{i}' for i in range(len(importances))]
+                    
+                    # Sort features by importance
+                    indices = np.argsort(importances)[::-1]
+                    
+                    plt.figure(figsize=(12, 8))
+                    plt.bar(range(len(importances)), importances[indices], color='forestgreen', alpha=0.7)
+                    plt.title(f'Feature Importance - {best_model_name}', fontsize=16, fontweight='bold')
+                    plt.xlabel('Features')
+                    plt.ylabel('Importance')
+                    plt.xticks(range(len(importances)), [feature_names[i] for i in indices], rotation=45)
+                    plt.grid(axis='y', alpha=0.3)
+                    plt.tight_layout()
+                    
+                else:
+                    plt.text(0.5, 0.5, f'Feature Importance\n{best_model_name}\n\n'
+                                       f'Feature importance not available\nfor this model type\n\n'
+                                       f'Available for tree-based models:\n'
+                                       f'• Random Forest\n• Gradient Boosting\n• Extra Trees\n• Decision Tree',
+                            ha='center', va='center', transform=plt.gca().transAxes,
+                            fontsize=14, bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.7))
+                    plt.title('Feature Importance Analysis', fontsize=16, fontweight='bold')
+                    plt.axis('off')
             
             else:
                 # For other plot types, create informational plots
@@ -682,7 +560,37 @@ class RegressionPipeline:
             print(f"Error creating {plot_type} plot: {str(e)}")
             plt.close()
             return None
-              
+    
+    def predict(self, X_new):
+        """Make predictions on new data using the best model"""
+        if self.best_model is None:
+            raise ValueError("No trained model available. Train the pipeline first.")
+        
+        # Preprocess new data
+        X_processed = X_new.copy()
+        
+        # Apply categorical encoding
+        for col, encoder in self.categorical_encoders.items():
+            if col in X_processed.columns:
+                X_processed[col] = encoder.transform(X_processed[col].astype(str))
+        
+        # Scale features
+        if self.scaler:
+            X_processed = self.scaler.transform(X_processed)
+        
+        # Select features
+        if self.feature_selector:
+            X_processed = self.feature_selector.transform(X_processed)
+        
+        # Make predictions
+        predictions = self.best_model.predict(X_processed)
+        
+        # Inverse transform target if needed
+        if self.target_encoder:
+            predictions = self.target_encoder.inverse_transform(predictions)
+        
+        return predictions
+    
     @classmethod
     def load_pipeline(cls, filepath):
         """Load a saved pipeline"""
