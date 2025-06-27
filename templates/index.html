@@ -11,7 +11,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <header class="header">
             <div class="header-content">
                 <div class="logo-section">
@@ -35,281 +34,218 @@
             </div>
         </header>
 
-        <!-- Navigation -->
         <nav class="navigation">
             <div class="nav-tabs">
-                <button class="nav-tab active" data-section="upload">📁 Data Upload</button>
-                <button class="nav-tab" data-section="preprocessing">🧹 Data Cleaning</button>
-                <button class="nav-tab" data-section="training">🚀 Model Training</button>
-                <button class="nav-tab" data-section="results">📊 Results &amp; Analytics</button>
-                <button class="nav-tab" data-section="prediction">🎯 Prediction</button>
+                <button class="nav-tab active" data-section="upload">📂 Upload Data</button>
+                <button class="nav-tab" data-section="cleaning">🧹 Data Cleaning</button>
+                <button class="nav-tab" data-section="training">🎯 Model Training</button>
+                <button class="nav-tab" data-section="results">📊 Results Analysis</button>
+                <button class="nav-tab" data-section="prediction">🔮 Prediction</button>
             </div>
         </nav>
 
-        <!-- Main Dashboard -->
         <div class="dashboard">
-            <!-- Upload Section -->
-            <section class="section active" id="upload-section">
+            <section id="upload-section" class="section active">
                 <div class="section-header">
-                    <h2>Data Upload &amp; Selection</h2>
+                    <h2>📂 Dataset Upload</h2>
                     <div class="section-actions">
-                        <button id="refresh-datasets" class="btn btn-secondary">🔄 Refresh</button>
-                        <button id="clear-data" class="btn btn-danger">🗑️ Clear Data</button>
+                        <button class="btn btn-secondary" onclick="location.reload()">🔄 Refresh</button>
                     </div>
                 </div>
 
-                <div class="upload-area">
-                    <div class="upload-methods">
-                        <div class="upload-method">
-                            <h3>📤 Upload New Dataset</h3>
-                            <div class="upload-zone" id="upload-zone">
-                                <input type="file" id="file-input" accept=".csv" multiple>
-                                <div class="upload-content">
-                                    <div class="upload-icon">📁</div>
-                                    <p>Drag &amp; drop CSV files here or <span class="upload-link">browse files</span></p>
-                                    <small>Supported: CSV files up to 100MB</small>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="existing-datasets">
-                            <h3>📋 Existing Datasets</h3>
-                            <div class="dataset-list" id="dataset-list">
-                                {% if datasets %}
-                                    {% for dataset in datasets %}
-                                    <div class="dataset-item" data-filename="{{ dataset }}">
-                                        <div class="dataset-info">
-                                            <span class="dataset-name">{{ dataset }}</span>
-                                            <small class="dataset-size">CSV File</small>
-                                        </div>
-                                        <div class="dataset-actions">
-                                            <button class="btn btn-sm btn-primary" onclick="selectDataset('{{ dataset }}')">
-                                                📊 Select
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                {% else %}
-                                    <div class="no-datasets">
-                                        <p>No datasets uploaded yet. Upload your first CSV file above.</p>
-                                    </div>
-                                {% endif %}
-                            </div>
-                        </div>
+                <div class="upload-container">
+                    <div class="upload-zone" id="upload-zone">
+                        <div class="upload-icon">📁</div>
+                        <h3>Drop your CSV file here or click to browse</h3>
+                        <p>Supports CSV files up to 100MB</p>
+                        <input type="file" id="file-input" accept=".csv" multiple style="display: none;">
                     </div>
 
-                    <div class="dataset-preview" id="dataset-preview">
-                        <h3>📊 Dataset Preview</h3>
-                        <div class="preview-content" id="preview-content">
-                            <p>Select or upload a dataset to see preview</p>
-                        </div>
+                    <div class="select-wrapper">
+                        <select id="dataset-select">
+                            <option value="">Choose existing dataset...</option>
+                            {% for dataset in datasets %}
+                            <option value="{{ dataset }}">{{ dataset }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
+
+                <div class="dataset-preview" id="dataset-preview"></div>
             </section>
 
-            <!-- Preprocessing Section -->
-            <section class="section" id="preprocessing-section">
+            <section id="cleaning-section" class="section">
                 <div class="section-header">
-                    <h2>Data Cleaning &amp; Preprocessing</h2>
+                    <h2>🧹 Data Cleaning</h2>
                     <div class="section-actions">
-                        <button id="detect-outliers" class="btn btn-secondary">🎯 Detect Outliers</button>
-                        <button id="apply-cleaning" class="btn btn-primary">✨ Apply Cleaning</button>
+                        <button id="detect-outliers" class="btn btn-primary">🔍 Detect Outliers</button>
+                        <button id="apply-cleaning" class="btn btn-success">✅ Apply Cleaning</button>
                     </div>
                 </div>
 
-                <div class="preprocessing-content">
-                    <div class="preprocessing-tabs">
-                        <button class="tab-btn active" data-tab="overview">📋 Overview</button>
-                        <button class="tab-btn" data-tab="columns">📊 Columns</button>
-                        <button class="tab-btn" data-tab="missing">❓ Missing Values</button>
-                        <button class="tab-btn" data-tab="outliers">🎯 Outliers</button>
-                        <button class="tab-btn" data-tab="encoding">🔤 Encoding</button>
-                        <button class="tab-btn" data-tab="scaling">📏 Scaling</button>
+                <div class="preprocessing-tabs">
+                    <div class="tab-nav">
+                        <button class="tab-btn active cleaning-tab" data-tab="overview">Overview</button>
+                        <button class="tab-btn cleaning-tab" data-tab="missing">Missing Values</button>
+                        <button class="tab-btn cleaning-tab" data-tab="outliers">Outliers</button>
+                        <button class="tab-btn cleaning-tab" data-tab="transformations">Transformations</button>
                     </div>
 
-                    <div class="tab-content active" id="overview-tab">
-                        <div class="data-overview" id="data-overview">
-                            <p>Select a dataset to view preprocessing options</p>
+                    <div id="overview-content" class="tab-content active cleaning-content">
+                        <div class="data-overview">
+                            <div class="overview-section">
+                                <h4>Dataset Quality Overview</h4>
+                                <div id="data-quality-report"></div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="tab-content" id="columns-tab">
-                        <div class="columns-management" id="columns-management">
-                            <p>Column management tools will appear here</p>
+                    <div id="missing-content" class="tab-content cleaning-content">
+                        <div class="overview-section">
+                            <h4>Handle Missing Values</h4>
+                            <div id="missing-values-display"></div>
                         </div>
                     </div>
 
-                    <div class="tab-content" id="missing-tab">
-                        <div class="missing-values-handler" id="missing-values-handler">
-                            <p>Missing values handling options</p>
+                    <div id="outliers-content" class="tab-content cleaning-content">
+                        <div class="overview-section">
+                            <h4>Outlier Detection & Removal</h4>
+                            <div id="outliers-display"></div>
                         </div>
                     </div>
 
-                    <div class="tab-content" id="outliers-tab">
-                        <div class="outliers-detector" id="outliers-detector">
-                            <p>Outlier detection results will appear here</p>
-                        </div>
-                    </div>
-
-                    <div class="tab-content" id="encoding-tab">
-                        <div class="encoding-options" id="encoding-options">
-                            <p>Categorical encoding options</p>
-                        </div>
-                    </div>
-
-                    <div class="tab-content" id="scaling-tab">
-                        <div class="scaling-options" id="scaling-options">
-                            <p>Feature scaling options</p>
+                    <div id="transformations-content" class="tab-content cleaning-content">
+                        <div class="overview-section">
+                            <h4>Data Transformations</h4>
+                            <div id="transformations-options"></div>
                         </div>
                     </div>
                 </div>
+
+                <div id="cleaning-results"></div>
             </section>
 
-            <!-- Training Section -->
-            <section class="section" id="training-section">
+            <section id="training-section" class="section">
                 <div class="section-header">
-                    <h2>Model Training &amp; Configuration</h2>
+                    <h2>🎯 Model Training</h2>
                     <div class="section-actions">
                         <button id="start-training" class="btn btn-primary">🚀 Start Training</button>
-                        <button id="stop-training" class="btn btn-danger" style="display: none;">⏹️ Stop</button>
+                        <button id="stop-training" class="btn btn-danger" disabled>⏹ Stop Training</button>
                     </div>
                 </div>
 
                 <div class="training-config">
-                    <div class="config-groups">
-                        <div class="config-group">
-                            <h3>📊 Data Split Configuration</h3>
-                            <div class="config-row">
-                                <label>Training Split:</label>
-                                <input type="range" id="train-split" min="60" max="90" value="80" step="5">
-                                <span id="train-split-value">80%</span>
+                    <h3>Training Configuration</h3>
+                    <form id="training-config-form">
+                        <div class="config-groups">
+                            <div class="config-group">
+                                <h3>Data Split</h3>
+                                <div class="config-row">
+                                    <label for="test-size">Test Size:</label>
+                                    <input type="number" id="test-size" min="0.1" max="0.5" step="0.05" value="0.2">
+                                </div>
+                                <div class="config-row">
+                                    <label for="random-state">Random State:</label>
+                                    <input type="number" id="random-state" value="42">
+                                </div>
+                                <div class="config-row">
+                                    <label for="cv-folds">CV Folds:</label>
+                                    <input type="number" id="cv-folds" min="3" max="10" value="5">
+                                </div>
                             </div>
-                            <div class="config-row">
-                                <label>Validation Split:</label>
-                                <input type="range" id="val-split" min="5" max="25" value="15" step="5">
-                                <span id="val-split-value">15%</span>
+                            <div class="config-group">
+                                <h3>Feature Engineering</h3>
+                                <div class="config-row">
+                                    <label for="scaling-method">Scaling Method:</label>
+                                    <select id="scaling-method">
+                                        <option value="standard">Standard</option>
+                                        <option value="minmax">Min-Max</option>
+                                        <option value="robust">Robust</option>
+                                    </select>
+                                </div>
+                                <div class="config-row">
+                                    <label for="feature-selection-k">Feature Selection:</label>
+                                    <select id="feature-selection-k">
+                                        <option value="all">All Features</option>
+                                        <option value="10">Top 10</option>
+                                        <option value="15">Top 15</option>
+                                        <option value="20">Top 20</option>
+                                    </select>
+                                </div>
+                                <div class="config-row checkbox-row">
+                                    <label>
+                                        <input type="checkbox" id="hyperparameter-tuning" checked>
+                                        Hyperparameter Tuning
+                                    </label>
+                                </div>
+                                <div class="config-row checkbox-row">
+                                    <label>
+                                        <input type="checkbox" id="feature-engineering" checked>
+                                        Feature Engineering
+                                    </label>
+                                </div>
                             </div>
                         </div>
+                    </form>
+                </div>
 
-                        <div class="config-group">
-                            <h3>🎯 Target Column</h3>
-                            <select id="target-column">
-                                <option value="">Select target column...</option>
+                <div id="training-progress-container" class="progress-container" style="display: none;">
+                    <h3>Training Progress</h3>
+                    <div class="progress-bar-wrapper">
+                        <div class="progress-bar">
+                            <div id="training-progress-bar" class="progress-fill"></div>
+                        </div>
+                        <span id="training-progress-percentage">0%</span>
+                    </div>
+                    <p id="training-progress-text" class="progress-text">Initializing...</p>
+                </div>
+            </section>
+
+            <section id="results-section" class="section">
+                <div class="section-header">
+                    <h2>📊 Results Analysis</h2>
+                    <div class="section-actions">
+                        <button id="export-results" class="btn btn-primary">📥 Export Results</button>
+                        <button id="download-model" class="btn btn-secondary">💾 Download Model</button>
+                    </div>
+                </div>
+
+                <div id="training-results"></div>
+                <div id="visualizations-container"></div>
+            </section>
+
+            <section id="prediction-section" class="section">
+                <div class="section-header">
+                    <h2>🔮 Make Predictions</h2>
+                    <div class="section-actions">
+                        <button id="batch-prediction" class="btn btn-secondary">📊 Batch Prediction</button>
+                    </div>
+                </div>
+
+                <div class="prediction-container">
+                    <div class="prediction-form">
+                        <h3>Single Prediction</h3>
+                        <div class="select-wrapper">
+                            <select id="prediction-model-select">
+                                <option value="">Choose a trained model...</option>
                             </select>
                         </div>
 
-                        <div class="config-group">
-                            <h3>🧠 Model Selection</h3>
-                            <div class="model-checkboxes">
-                                <label><input type="checkbox" value="linear_regression" checked> Linear Regression</label>
-                                <label><input type="checkbox" value="random_forest" checked> Random Forest</label>
-                                <label><input type="checkbox" value="gradient_boosting" checked> Gradient Boosting</label>
-                                <label><input type="checkbox" value="support_vector" checked> Support Vector Regression</label>
-                                <label><input type="checkbox" value="neural_network"> Neural Network</label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="training-progress" id="training-progress-section" style="display: none;">
-                    <h3>🔄 Training Progress</h3>
-                    <div class="progress-container">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
-                        </div>
-                        <div class="progress-info">
-                            <span class="progress-text" id="progress-text">Initializing...</span>
-                            <span class="progress-percentage" id="progress-percentage">0%</span>
-                        </div>
-                    </div>
-                    <div class="training-status" id="training-status"></div>
-                </div>
-            </section>
-
-            <!-- Results Section -->
-            <section class="section" id="results-section">
-                <div class="section-header">
-                    <h2>Training Results &amp; Model Comparison</h2>
-                    <div class="section-actions">
-                        <button id="export-results" class="btn btn-secondary">💾 Export Results</button>
-                        <button id="download-models" class="btn btn-primary">📦 Download Models</button>
-                    </div>
-                </div>
-
-                <div class="results-content">
-                    <div class="model-comparison" id="model-comparison">
-                        <h3>🏆 Model Performance Comparison</h3>
-                        <div class="comparison-table-container">
-                            <table class="comparison-table">
-                                <thead>
-                                    <tr>
-                                        <th>Model</th>
-                                        <th>R² Score</th>
-                                        <th>MSE</th>
-                                        <th>MAE</th>
-                                        <th>RMSE</th>
-                                        <th>CV Score</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="comparison-tbody"></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="visualizations" id="visualizations">
-                        <h3>📈 Model Visualizations</h3>
-                        <div class="viz-grid" id="viz-grid"></div>
-                    </div>
-
-                    <div class="feature-importance" id="feature-importance">
-                        <h3>🎯 Feature Importance Analysis</h3>
-                        <div class="feature-charts" id="feature-charts"></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Prediction Section -->
-            <section class="section" id="prediction-section">
-                <div class="section-header">
-                    <h2>Model Prediction Interface</h2>
-                    <div class="section-actions">
-                        <button id="load-model" class="btn btn-secondary">📂 Load Model</button>
-                        <button id="batch-predict" class="btn btn-primary">📊 Batch Predict</button>
-                    </div>
-                </div>
-
-                <div class="prediction-interface">
-                    <div class="model-selector">
-                        <label>Select Model for Prediction:</label>
-                        <select id="prediction-model-select">
-                            <option value="">-- Choose Trained Model --</option>
-                        </select>
-                    </div>
-
-                    <div class="prediction-input">
-                        <h3>Input Features</h3>
                         <div class="feature-inputs" id="feature-inputs">
-                            <p>Train a model first to enable predictions</p>
+                            <p class="text-muted">Please train a model first to enable predictions.</p>
                         </div>
-                        <button id="make-prediction" class="btn btn-success" disabled>🎯 Predict</button>
+
+                        <button id="make-prediction" class="btn btn-primary">🔮 Make Prediction</button>
                     </div>
 
-                    <div class="prediction-results" id="prediction-results"></div>
-
-                    <div class="batch-prediction">
-                        <h3>Batch Prediction</h3>
-                        <div class="batch-upload">
-                            <input type="file" id="batch-file" accept=".csv">
-                            <label for="batch-file">Upload CSV for batch prediction</label>
-                        </div>
-                        <div class="batch-results" id="batch-results"></div>
-                    </div>
+                    <div id="prediction-result"></div>
                 </div>
+
+                <div id="batch-results"></div>
+                <input type="file" id="batch-file-input" accept=".csv" style="display: none;">
             </section>
         </div>
 
-        <!-- Side Panel -->
         <div class="side-panel" id="side-panel">
             <div class="panel-header">
                 <h3>System Status</h3>
@@ -341,8 +277,7 @@
             </div>
         </div>
 
-        <!-- Modals -->
-        <div class="modal" id="model-details-modal">
+        <div class="modal" id="model-details-modal" style="display: none;">
             <div class="modal-content">
                 <div class="modal-header">
                     <h3>Model Details</h3>
@@ -352,11 +287,9 @@
             </div>
         </div>
 
-        <!-- Notifications -->
         <div class="notifications" id="notifications"></div>
 
-        <!-- Loading Overlay -->
-        <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-overlay" id="loading-overlay" style="display: none;">
             <div class="loading-content">
                 <div class="spinner"></div>
                 <h3 id="loading-title">Processing...</h3>
