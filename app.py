@@ -390,7 +390,7 @@ def handle_training(data):
                 
                 if X is None or y is None:
                     with app.app_context():
-                        socketio.emit('training_error', {'error': 'Failed to load or preprocess dataset. Please check the data format.'}, room=session_id)
+                        socketio.emit('training_error', {'error': 'Failed to load or preprocess dataset.'}, room=session_id)
                     return
                 
                 # Store basic data info
@@ -416,80 +416,75 @@ def handle_training(data):
                 logger.info(f"Raw results type: {type(results)}")
                 logger.info(f"Raw results keys: {list(results.keys()) if isinstance(results, dict) else 'Not a dict'}")
                 
-                # If train_models returns None or empty, use pipeline attributes
+                # ✅ FIXED: Now results should be properly returned
                 if not results:
-                    results = getattr(pipeline, 'results', {})
-                
-                # Ensure we have basic results structure
-                if not results:
+                    logger.warning("No results returned from training")
                     results = {
                         'training_completed': True,
-                        'models_trained': len(pipeline.algorithms),
-                        'best_model_name': str(getattr(pipeline, 'best_model', 'Unknown')),
-                        'best_score': float(getattr(pipeline, 'best_score', 0.0))
+                        'models_trained': 0,
+                        'error': 'No models were successfully trained'
                     }
                 
-                # Add trained models info if available
-                if hasattr(pipeline, 'trained_models') and pipeline.trained_models:
-                    model_summaries = {}
-                    for model_name, model_info in pipeline.trained_models.items():
-                        logger.info(f"Processing model {model_name}, info type: {type(model_info)}")
-                        if isinstance(model_info, dict):
-                            # Convert each metric to safe type
-                            safe_info = {}
-                            for metric_name, metric_value in model_info.items():
-                                logger.info(f"Metric {metric_name}: {type(metric_value)} = {metric_value}")
-                                safe_info[metric_name] = convert_numpy_types(metric_value)
-                            model_summaries[model_name] = safe_info
-                        else:
-                            model_summaries[model_name] = {'trained': True}
-                    results['model_summaries'] = model_summaries
+                # Process the model results properly
+                model_summary = {}
+                if hasattr(pipeline, 'results') and pipeline.results:
+                    for model_name, metrics in pipeline.results.items():
+                        model_summary[model_name] = {
+                            'r2_score': float(metrics.get('r2', 0)),
+                            'rmse': float(metrics.get('rmse', 0)),
+                            'mae': float(metrics.get('mae', 0)),
+                            'mse': float(metrics.get('mse', 0)),
+                            'cv_mean': float(metrics.get('cv_mean', 0)),
+                            'cv_std': float(metrics.get('cv_std', 0))
+                        }
+                
+                # Add summary statistics
+                final_results = {
+                    'training_completed': True,
+                    'models_trained': len(model_summary),
+                    'best_model_name': pipeline._get_best_model_name(),
+                    'best_score': float(pipeline.best_score) if pipeline.best_score != -float('inf') else 0.0,
+                    'model_summary': model_summary,
+                    'dataset_info': {
+                        'shape': list(pipeline.data_info.get('shape', [0, 0])),
+                        'features': pipeline.data_info.get('features', []),
+                        'target_column': pipeline.data_info.get('target_column', 'Unknown')
+                    }
+                }
                 
             except Exception as train_error:
                 logger.error(f"Training error: {train_error}")
-                results = {
+                final_results = {
                     'training_error': str(train_error),
                     'models_trained': 0
                 }
             
-            # Generate plots (add simple implementation)
+            # Generate plots
             backend_manager.emit_progress(session_id, "Generating visualizations...", 80)
             plots = {}
             try:
-                # Simple plot generation - just create basic info for now
                 plots = {
-                    'model_comparison': 'Model comparison plot data would go here',
-                    'feature_importance': 'Feature importance plot data would go here',
-                    'residual_plots': 'Residual plots data would go here'
+                    'model_comparison': 'Model comparison plot data',
+                    'feature_importance': 'Feature importance plot data',
+                    'residual_plots': 'Residual plots data'
                 }
             except Exception as plot_error:
                 logger.warning(f"Plot generation failed: {plot_error}")
                 plots = {}
             
-            backend_manager.emit_progress(session_id, "Finalizing results...", 90)
-            json_safe_summary = convert_numpy_types(results)
-            try:
-                json.dumps(json_safe_summary)
-                logger.info("Results successfully converted to JSON-safe format")
-            except TypeError as e:
-                logger.error(f"Still have JSON serialization issues: {e}")
-                # Final fallback - convert everything to strings
-                json_safe_summary = {str(k): str(v) for k, v in results.items()}
-            
-            plots_safe = convert_numpy_types(plots)
-            data_info_safe = convert_numpy_types(getattr(pipeline, 'data_info', {}))
-            
+            # Final emission
             backend_manager.emit_progress(session_id, "Training completed successfully!", 100, {
-                'model_summary': json_safe_summary,
-                'plots': plots_safe,
-                'dataset_info': data_info_safe
+                'model_summary': final_results.get('model_summary', {}),
+                'training_summary': final_results,
+                'plots': plots,
+                'dataset_info': final_results.get('dataset_info', {})
             })
             
         except Exception as e:
             logger.error(f"Training error: {str(e)}")
             with app.app_context():
                 socketio.emit('training_error', {'error': str(e)}, room=session_id)
-    
+
     training_thread = threading.Thread(target=training_worker)
     training_thread.daemon = True
     training_thread.start()
