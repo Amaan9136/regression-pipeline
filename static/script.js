@@ -1,25 +1,20 @@
 class MLPipelineApp {
     constructor() {
-        // Core application state
         this.socket = io();
         this.sessionId = null;
         this.currentDataset = null;
         this.trainingInProgress = false;
         this.currentStep = 'upload';
-        
-        // Data and results storage
         this.datasetInfo = null;
         this.cleaningOperations = {};
         this.modelResults = {};
         this.visualizations = {};
         this.predictionModels = [];
-        
-        // UI state
         this.activeTab = 'upload';
         this.healthCheckInterval = null;
         this.connectionEstablished = false;
+        this.isUploading = false;
         
-        // Configuration
         this.config = {
             ALERT_AUTO_REMOVE_DELAY: 5000,
             MAX_ACTIVITY_LOGS: 50,
@@ -27,13 +22,8 @@ class MLPipelineApp {
             PROGRESS_UPDATE_INTERVAL: 100
         };
         
-        // Initialize application
         this.initialize();
     }
-    
-    // =================
-    // INITIALIZATION
-    // =================
     
     initialize() {
         this.setupEventListeners();
@@ -44,7 +34,6 @@ class MLPipelineApp {
     }
     
     setupEventListeners() {
-        // Wait for DOM to be ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.bindEventListeners());
         } else {
@@ -53,7 +42,6 @@ class MLPipelineApp {
     }
     
     bindEventListeners() {
-        // Navigation tabs
         document.querySelectorAll('.nav-tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
                 const section = e.target.dataset.section;
@@ -61,36 +49,18 @@ class MLPipelineApp {
             });
         });
         
-        // File upload functionality
         this.setupFileUpload();
-        
-        // Data preprocessing handlers
         this.setupDataPreprocessing();
-        
-        // Training handlers
         this.setupTrainingHandlers();
-        
-        // Results and analytics
         this.setupResultsHandlers();
-        
-        // Prediction handlers
         this.setupPredictionHandlers();
-        
-        // Side panel handlers
         this.setupSidePanelHandlers();
-        
-        // Modal handlers
         this.setupModalHandlers();
         
         console.log('✅ Event listeners bound successfully');
     }
     
-    // =================
-    // WEBSOCKET SETUP
-    // =================
-    
     setupWebSocketHandlers() {
-        // Connection events
         this.socket.on('connect', () => {
             console.log('🔗 Connected to server');
             this.connectionEstablished = true;
@@ -105,7 +75,6 @@ class MLPipelineApp {
             this.showAlert('Connection lost. Attempting to reconnect...', 'warning');
         });
         
-        // Session management
         this.socket.on('session_created', (data) => {
             this.sessionId = data.session_id;
             this.updateSessionInfo();
@@ -113,36 +82,27 @@ class MLPipelineApp {
             console.log(`📱 Session created: ${this.sessionId}`);
         });
         
-        // Training progress
         this.socket.on('training_progress', (data) => {
             this.updateTrainingProgress(data);
             this.addActivityLog(data.message, 'info', data.progress);
             
-            // Handle completion
             if (data.progress === 100 && data.data) {
                 this.handleTrainingCompletion(data.data);
             }
         });
         
-        // Training errors
         this.socket.on('training_error', (data) => {
             this.handleTrainingError(data.error);
         });
         
-        // Real-time updates
         this.socket.on('data_update', (data) => {
             this.handleDataUpdate(data);
         });
         
-        // System status updates
         this.socket.on('system_status', (data) => {
             this.updateSystemStatus(data);
         });
     }
-    
-    // =================
-    // FILE UPLOAD SETUP
-    // =================
     
     setupFileUpload() {
         const fileInput = document.getElementById('file-input');
@@ -150,16 +110,21 @@ class MLPipelineApp {
         const datasetSelect = document.getElementById('dataset-select');
         
         if (uploadZone) {
-            // Drag and drop functionality
             uploadZone.addEventListener('dragover', this.handleDragOver.bind(this));
             uploadZone.addEventListener('dragleave', this.handleDragLeave.bind(this));
             uploadZone.addEventListener('drop', this.handleFileDrop.bind(this));
-            uploadZone.addEventListener('click', () => fileInput?.click());
+            uploadZone.addEventListener('click', () => {
+                if (!this.isUploading && fileInput) {
+                    fileInput.click();
+                }
+            });
         }
         
         if (fileInput) {
             fileInput.addEventListener('change', (e) => {
-                this.processFiles(Array.from(e.target.files));
+                if (!this.isUploading) {
+                    this.processFiles(Array.from(e.target.files));
+                }
             });
         }
         
@@ -173,7 +138,9 @@ class MLPipelineApp {
     handleDragOver(e) {
         e.preventDefault();
         e.stopPropagation();
-        e.currentTarget.classList.add('dragover');
+        if (!this.isUploading) {
+            e.currentTarget.classList.add('dragover');
+        }
     }
     
     handleDragLeave(e) {
@@ -186,11 +153,15 @@ class MLPipelineApp {
         e.preventDefault();
         e.stopPropagation();
         e.currentTarget.classList.remove('dragover');
-        const files = Array.from(e.dataTransfer.files);
-        this.processFiles(files);
+        if (!this.isUploading) {
+            const files = Array.from(e.dataTransfer.files);
+            this.processFiles(files);
+        }
     }
     
     async processFiles(files) {
+        if (this.isUploading) return;
+        
         const csvFiles = files.filter(file => file.name.endsWith('.csv'));
         
         if (csvFiles.length === 0) {
@@ -204,7 +175,10 @@ class MLPipelineApp {
     }
     
     async uploadFile(file) {
+        if (this.isUploading) return;
+        
         try {
+            this.isUploading = true;
             this.showLoading(`Uploading ${file.name}...`);
             
             const formData = new FormData();
@@ -224,6 +198,7 @@ class MLPipelineApp {
                 this.displayDatasetPreview(result.preview);
                 this.updateDatasetStats();
                 this.addActivityLog(`Dataset uploaded: ${result.filename}`, 'success');
+                this.refreshDatasetSelect();
             } else {
                 throw new Error(result.error || 'Upload failed');
             }
@@ -231,6 +206,7 @@ class MLPipelineApp {
             this.showAlert(`Upload failed: ${error.message}`, 'error');
             console.error('Upload error:', error);
         } finally {
+            this.isUploading = false;
             this.hideLoading();
         }
     }
@@ -241,13 +217,16 @@ class MLPipelineApp {
         try {
             this.showLoading('Loading dataset information...');
             
-            // Get dataset info
             const response = await fetch(`/api/dataset_info/${filename}`);
             const result = await response.json();
             
             if (result.success) {
                 this.currentDataset = filename;
                 this.datasetInfo = result.info;
+                
+                console.log('Dataset info received:', result.info);
+                console.log('Columns type:', typeof result.info.columns, result.info.columns);
+                
                 this.displayDatasetPreview(result.info);
                 this.updateDatasetStats();
                 this.addActivityLog(`Dataset selected: ${filename}`, 'info');
@@ -255,137 +234,36 @@ class MLPipelineApp {
                 throw new Error(result.error || 'Failed to load dataset info');
             }
         } catch (error) {
-            this.showAlert(`Failed to load dataset: ${error.message}`, 'error');
+            this.showAlert(`Error loading dataset: ${error.message}`, 'error');
+            console.error('Dataset selection error:', error);
         } finally {
             this.hideLoading();
         }
     }
     
-    // =================
-    // DATA PREPROCESSING
-    // =================
+    refreshDatasetSelect() {
+        fetch('/health').then(() => {
+            location.reload();
+        }).catch(console.error);
+    }
     
     setupDataPreprocessing() {
-        // Clean data button
-        const cleanDataBtn = document.getElementById('clean-data-btn');
-        if (cleanDataBtn) {
-            cleanDataBtn.addEventListener('click', () => this.showCleaningInterface());
-        }
+        const detectOutliersBtn = document.getElementById('detect-outliers');
+        const applyCleaningBtn = document.getElementById('apply-cleaning');
         
-        // Apply cleaning button
-        const applyCleaningBtn = document.getElementById('apply-cleaning-btn');
-        if (applyCleaningBtn) {
-            applyCleaningBtn.addEventListener('click', () => this.applyDataCleaning());
-        }
-        
-        // Detect outliers button
-        const detectOutliersBtn = document.getElementById('detect-outliers-btn');
         if (detectOutliersBtn) {
             detectOutliersBtn.addEventListener('click', () => this.detectOutliers());
         }
         
-        // Tab switching for cleaning
-        document.querySelectorAll('.tab-btn').forEach(tab => {
+        if (applyCleaningBtn) {
+            applyCleaningBtn.addEventListener('click', () => this.applyDataCleaning());
+        }
+        
+        document.querySelectorAll('.cleaning-tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
-                const tabName = e.target.dataset.tab;
-                if (tabName) this.switchCleaningTab(tabName);
+                this.switchCleaningTab(e.target.dataset.tab);
             });
         });
-    }
-    
-    async showCleaningInterface() {
-        if (!this.currentDataset) {
-            this.showAlert('Please select a dataset first', 'warning');
-            return;
-        }
-        
-        this.switchSection('preprocessing');
-        await this.loadDatasetAnalysis();
-    }
-    
-    async loadDatasetAnalysis() {
-        try {
-            this.showLoading('Analyzing dataset...');
-            
-            const response = await fetch(`/api/analyze_dataset/${this.currentDataset}`);
-            const result = await response.json();
-            
-            if (result.success) {
-                this.displayDataAnalysis(result.analysis);
-                this.setupCleaningControls(result.analysis);
-            } else {
-                throw new Error(result.error || 'Analysis failed');
-            }
-        } catch (error) {
-            this.showAlert(`Analysis failed: ${error.message}`, 'error');
-        } finally {
-            this.hideLoading();
-        }
-    }
-    
-    displayDataAnalysis(analysis) {
-        // Display overview
-        this.displayDataOverview(analysis);
-        
-        // Display column information
-        this.displayColumnAnalysis(analysis.columns);
-        
-        // Display missing values
-        this.displayMissingValues(analysis.missing_values);
-        
-        // Display statistical summary
-        this.displayStatisticalSummary(analysis.statistics);
-    }
-    
-    displayDataOverview(analysis) {
-        const overviewDiv = document.getElementById('data-overview');
-        if (!overviewDiv) return;
-        
-        overviewDiv.innerHTML = `
-            <div class="overview-section">
-                <h4>📊 Dataset Summary</h4>
-                <div class="overview-grid">
-                    <div class="overview-item">
-                        <div class="overview-item-label">Total Rows</div>
-                        <div class="overview-item-value">${analysis.shape[0].toLocaleString()}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">Total Columns</div>
-                        <div class="overview-item-value">${analysis.shape[1]}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">Memory Usage</div>
-                        <div class="overview-item-value">${this.formatBytes(analysis.memory_usage || 0)}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">Missing Values</div>
-                        <div class="overview-item-value">${analysis.total_missing || 0}</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="overview-section">
-                <h4>🏷️ Data Types</h4>
-                <div class="overview-grid">
-                    <div class="overview-item">
-                        <div class="overview-item-label">Numeric Columns</div>
-                        <div class="overview-item-value">${analysis.numeric_columns?.length || 0}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">Categorical Columns</div>
-                        <div class="overview-item-value">${analysis.categorical_columns?.length || 0}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">Boolean Columns</div>
-                        <div class="overview-item-value">${analysis.boolean_columns?.length || 0}</div>
-                    </div>
-                    <div class="overview-item">
-                        <div class="overview-item-label">DateTime Columns</div>
-                        <div class="overview-item-value">${analysis.datetime_columns?.length || 0}</div>
-                    </div>
-                </div>
-            </div>
-        `;
     }
     
     async detectOutliers() {
@@ -397,15 +275,12 @@ class MLPipelineApp {
         try {
             this.showLoading('Detecting outliers...');
             
-            const method = document.getElementById('outlier-method')?.value || 'iqr';
-            const threshold = document.getElementById('outlier-threshold')?.value || 1.5;
-            
-            const response = await fetch(`/api/detect_outliers/${this.currentDataset}?method=${method}&threshold=${threshold}`);
+            const response = await fetch(`/api/detect_outliers/${this.currentDataset}`);
             const result = await response.json();
             
             if (result.success) {
                 this.displayOutliers(result.outliers);
-                this.addActivityLog('Outliers detected successfully', 'info');
+                this.addActivityLog('Outliers detected successfully', 'success');
             } else {
                 throw new Error(result.error || 'Outlier detection failed');
             }
@@ -414,35 +289,6 @@ class MLPipelineApp {
         } finally {
             this.hideLoading();
         }
-    }
-    
-    displayOutliers(outliers) {
-        const outliersDiv = document.getElementById('outliers-detector');
-        if (!outliersDiv) return;
-        
-        let html = '<div class="outliers-summary"><h4>🎯 Outliers Detection Results</h4>';
-        
-        Object.entries(outliers).forEach(([column, data]) => {
-            if (data.outliers && data.outliers.length > 0) {
-                html += `
-                    <div class="outlier-column">
-                        <h5>${column}</h5>
-                        <p>Found ${data.outliers.length} outliers</p>
-                        <div class="outlier-actions">
-                            <button class="btn btn-sm btn-secondary" onclick="mlApp.viewColumnOutliers('${column}')">
-                                View Details
-                            </button>
-                            <button class="btn btn-sm btn-danger" onclick="mlApp.removeColumnOutliers('${column}')">
-                                Remove Outliers
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }
-        });
-        
-        html += '</div>';
-        outliersDiv.innerHTML = html;
     }
     
     async applyDataCleaning() {
@@ -468,16 +314,11 @@ class MLPipelineApp {
             const result = await response.json();
             
             if (result.success) {
-                this.showAlert('Data cleaning applied successfully!', 'success');
                 this.displayCleaningResults(result);
-                this.addActivityLog('Data cleaning completed', 'success');
-                
-                // Update current dataset to cleaned version
-                if (result.cleaned_filename) {
-                    this.currentDataset = result.cleaned_filename;
-                }
+                this.addActivityLog('Data cleaning applied successfully', 'success');
+                this.currentDataset = result.cleaned_filename;
             } else {
-                throw new Error(result.error || 'Cleaning failed');
+                throw new Error(result.error || 'Data cleaning failed');
             }
         } catch (error) {
             this.showAlert(`Data cleaning failed: ${error.message}`, 'error');
@@ -486,61 +327,27 @@ class MLPipelineApp {
         }
     }
     
-    displayCleaningResults(results) {
-        const resultsDiv = document.getElementById('cleaning-results');
-        if (!resultsDiv) return;
-        
-        resultsDiv.innerHTML = `
-            <div class="cleaning-summary">
-                <h4>🧹 Cleaning Results</h4>
-                <div class="results-grid">
-                    <div class="result-item">
-                        <span class="result-label">Original Shape:</span>
-                        <span class="result-value">${results.original_shape[0]} × ${results.original_shape[1]}</span>
-                    </div>
-                    <div class="result-item">
-                        <span class="result-label">Final Shape:</span>
-                        <span class="result-value">${results.final_shape[0]} × ${results.final_shape[1]}</span>
-                    </div>
-                    <div class="result-item">
-                        <span class="result-label">Cleaned File:</span>
-                        <span class="result-value">${results.cleaned_filename}</span>
-                    </div>
-                </div>
-                ${results.cleaning_summary ? this.renderCleaningSummary(results.cleaning_summary) : ''}
-            </div>
-        `;
-    }
-    
-    // =================
-    // TRAINING SETUP
-    // =================
-    
     setupTrainingHandlers() {
-        // Start training button
         const startTrainingBtn = document.getElementById('start-training');
+        const stopTrainingBtn = document.getElementById('stop-training');
+        
         if (startTrainingBtn) {
             startTrainingBtn.addEventListener('click', () => this.startTraining());
         }
         
-        // Stop training button
-        const stopTrainingBtn = document.getElementById('stop-training');
         if (stopTrainingBtn) {
             stopTrainingBtn.addEventListener('click', () => this.stopTraining());
         }
         
-        // Configuration updates
         this.setupTrainingConfiguration();
     }
     
     setupTrainingConfiguration() {
-        // Training configuration form
         const configForm = document.getElementById('training-config-form');
         if (configForm) {
             configForm.addEventListener('change', () => this.updateTrainingConfig());
         }
         
-        // Advanced configuration toggles
         const advancedToggle = document.getElementById('advanced-config-toggle');
         if (advancedToggle) {
             advancedToggle.addEventListener('change', (e) => {
@@ -576,365 +383,134 @@ class MLPipelineApp {
         }
         
         if (this.trainingInProgress) {
-            this.showAlert('Training is already in progress', 'info');
+            this.showAlert('Training already in progress', 'warning');
             return;
         }
         
         try {
             this.trainingInProgress = true;
             this.updateTrainingUI(true);
-            this.updateTrainingConfig();
+            
+            const config = this.trainingConfig || {};
             
             this.socket.emit('start_training', {
                 session_id: this.sessionId,
                 dataset: this.currentDataset,
-                config: this.trainingConfig || {}
+                config: config
             });
             
-            this.addActivityLog('Training started...', 'info');
-            this.switchSection('training');
+            this.addActivityLog('Training started', 'info');
+            this.showAlert('Training started successfully', 'success');
             
         } catch (error) {
-            this.showAlert(`Error starting training: ${error.message}`, 'error');
+            this.showAlert(`Failed to start training: ${error.message}`, 'error');
             this.trainingInProgress = false;
             this.updateTrainingUI(false);
         }
     }
     
     stopTraining() {
-        if (!this.trainingInProgress) {
-            this.showAlert('No training in progress', 'info');
-            return;
-        }
-        
-        // Emit stop training signal
-        this.socket.emit('stop_training', {
-            session_id: this.sessionId
-        });
-        
         this.trainingInProgress = false;
         this.updateTrainingUI(false);
-        this.addActivityLog('Training stopped by user', 'warning');
-        this.showAlert('Training stopped', 'info');
+        this.addActivityLog('Training stopped', 'warning');
+        this.showAlert('Training stopped', 'warning');
+    }
+    
+    updateTrainingUI(inProgress) {
+        const startBtn = document.getElementById('start-training');
+        const stopBtn = document.getElementById('stop-training');
+        const progressContainer = document.getElementById('training-progress-container');
+        
+        if (startBtn) startBtn.disabled = inProgress;
+        if (stopBtn) stopBtn.disabled = !inProgress;
+        if (progressContainer) {
+            progressContainer.style.display = inProgress ? 'block' : 'none';
+        }
     }
     
     updateTrainingProgress(data) {
-        // Update progress bar
-        this.updateProgressBar(data.progress, data.message);
+        const progressBar = document.getElementById('training-progress-bar');
+        const progressText = document.getElementById('training-progress-text');
+        const progressPercentage = document.getElementById('training-progress-percentage');
         
-        // Update training status
-        const statusDiv = document.getElementById('training-status');
-        if (statusDiv) {
-            statusDiv.innerHTML = `
-                <div class="status-item">
-                    <span class="status-label">Progress:</span>
-                    <span class="status-value">${data.progress}%</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Current Step:</span>
-                    <span class="status-value">${data.message}</span>
-                </div>
-                <div class="status-item">
-                    <span class="status-label">Time:</span>
-                    <span class="status-value">${new Date().toLocaleTimeString()}</span>
-                </div>
-            `;
+        if (progressBar) {
+            progressBar.style.width = `${data.progress}%`;
         }
         
-        // Update live metrics if available
-        if (data.data && data.data.live_metrics) {
-            this.updateLiveMetrics(data.data.live_metrics);
+        if (progressText) {
+            progressText.textContent = data.message;
         }
+        
+        if (progressPercentage) {
+            progressPercentage.textContent = `${data.progress}%`;
+        }
+        
+        console.log(`Training progress: ${data.progress}% - ${data.message}`);
     }
     
     handleTrainingCompletion(data) {
         this.trainingInProgress = false;
         this.updateTrainingUI(false);
-        
-        // Store results
         this.modelResults = data.model_summary || {};
         this.visualizations = data.plots || {};
         
-        // Switch to results section
-        this.switchSection('results');
-        
-        // Display results
         this.displayTrainingResults(data);
-        
-        // Update prediction models list
-        this.updatePredictionModels();
-        
+        this.addActivityLog('Training completed successfully!', 'success');
         this.showAlert('Training completed successfully!', 'success');
-        this.addActivityLog('Training completed successfully', 'success');
+        
+        this.switchSection('results');
     }
     
     handleTrainingError(error) {
         this.trainingInProgress = false;
         this.updateTrainingUI(false);
         this.showAlert(`Training failed: ${error}`, 'error');
-        this.addActivityLog(`Training failed: ${error}`, 'error');
+        this.addActivityLog(`Training error: ${error}`, 'error');
+        console.error('Training error:', error);
     }
     
-    // =================
-    // RESULTS DISPLAY
-    // =================
-    
     setupResultsHandlers() {
-        // Export results button
-        const exportBtn = document.getElementById('export-results-btn');
+        const exportBtn = document.getElementById('export-results');
+        const downloadBtn = document.getElementById('download-model');
+        
         if (exportBtn) {
             exportBtn.addEventListener('click', () => this.exportResults());
         }
         
-        // Model comparison
-        const compareBtn = document.getElementById('compare-models-btn');
-        if (compareBtn) {
-            compareBtn.addEventListener('click', () => this.compareModels());
-        }
-        
-        // Download model
-        const downloadBtn = document.getElementById('download-model-btn');
         if (downloadBtn) {
             downloadBtn.addEventListener('click', () => this.downloadModel());
         }
     }
     
-    displayTrainingResults(data) {
-        // Display model summary table
-        this.displayModelSummary(data.model_summary);
-        
-        // Display visualizations
-        this.displayVisualizations(data.plots);
-        
-        // Display feature importance
-        if (data.feature_importance) {
-            this.displayFeatureImportance(data.feature_importance);
-        }
-        
-        // Display best model details
-        this.displayBestModelDetails(data.model_summary);
-        
-        // Update statistics
-        this.updateResultsStatistics(data);
-    }
-    
-    displayModelSummary(modelSummary) {
-        const tableBody = document.getElementById('models-tbody');
-        if (!tableBody) return;
-        
-        const sortedModels = Object.entries(modelSummary)
-            .sort(([,a], [,b]) => (b.r2 || 0) - (a.r2 || 0));
-        
-        tableBody.innerHTML = sortedModels.map(([model, metrics], index) => `
-            <tr class="${index === 0 ? 'best-model' : ''}">
-                <td>
-                    <div class="model-name">
-                        ${index === 0 ? '🏆 ' : ''}${model}
-                        ${index === 0 ? '<span class="best-badge">Best</span>' : ''}
-                    </div>
-                </td>
-                <td><span class="metric-value">${this.formatMetric(metrics.r2)}</span></td>
-                <td><span class="metric-value">${this.formatMetric(metrics.mse)}</span></td>
-                <td><span class="metric-value">${this.formatMetric(metrics.mae)}</span></td>
-                <td><span class="metric-value">${this.formatMetric(metrics.rmse)}</span></td>
-                <td><span class="metric-value">${this.formatMetric(metrics.cv_score)}</span></td>
-                <td>
-                    <div class="model-actions">
-                        <button class="btn btn-sm btn-primary" onclick="mlApp.showModelDetails('${model}')">
-                            📊 Details
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="mlApp.useModelForPrediction('${model}')">
-                            🎯 Use for Prediction
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-    }
-    
-    displayVisualizations(plots) {
-        const plotsContainer = document.getElementById('visualizations-container');
-        if (!plotsContainer) return;
-        
-        let html = '';
-        
-        Object.entries(plots).forEach(([plotType, plotData]) => {
-            html += `
-                <div class="visualization-card">
-                    <div class="viz-header">
-                        <h4>${this.formatPlotTitle(plotType)}</h4>
-                        <div class="viz-actions">
-                            <button class="btn btn-sm btn-secondary" onclick="mlApp.downloadPlot('${plotType}')">
-                                💾 Download
-                            </button>
-                            <button class="btn btn-sm btn-primary" onclick="mlApp.expandPlot('${plotType}')">
-                                🔍 Expand
-                            </button>
-                        </div>
-                    </div>
-                    <div class="viz-content" id="plot-${plotType}">
-                        ${this.renderPlot(plotType, plotData)}
-                    </div>
-                </div>
-            `;
-        });
-        
-        plotsContainer.innerHTML = html;
-    }
-    
-    renderPlot(plotType, plotData) {
-        // Handle different plot types
-        if (plotData.type === 'plotly') {
-            // Render Plotly plots
-            setTimeout(() => {
-                Plotly.newPlot(`plot-${plotType}`, plotData.data, plotData.layout, {responsive: true});
-            }, 100);
-            return '<div class="plotly-container"></div>';
-        } else if (plotData.type === 'image') {
-            // Render image plots
-            return `<img src="data:image/png;base64,${plotData.data}" alt="${plotType}" class="plot-image">`;
-        } else {
-            // Handle other plot types
-            return '<div class="plot-placeholder">Plot will be rendered here</div>';
-        }
-    }
-    
-    async exportResults() {
-        if (!this.currentDataset) {
-            this.showAlert('No results to export', 'warning');
-            return;
-        }
-        
-        try {
-            this.showLoading('Exporting results...');
-            
-            const response = await fetch(`/api/export_results/${this.currentDataset.replace('.csv', '')}`);
-            const result = await response.json();
-            
-            if (result.success) {
-                this.showAlert('Results exported successfully!', 'success');
-                this.addActivityLog('Results exported', 'success');
-                
-                // Trigger download if available
-                if (result.download_url) {
-                    window.open(result.download_url, '_blank');
-                }
-            } else {
-                throw new Error(result.error || 'Export failed');
-            }
-        } catch (error) {
-            this.showAlert(`Export failed: ${error.message}`, 'error');
-        } finally {
-            this.hideLoading();
-        }
-    }
-    
-    // =================
-    // PREDICTION SETUP
-    // =================
-    
     setupPredictionHandlers() {
-        // Model selection for prediction
+        const makePredictionBtn = document.getElementById('make-prediction');
+        const batchPredictionBtn = document.getElementById('batch-prediction');
+        
+        if (makePredictionBtn) {
+            makePredictionBtn.addEventListener('click', () => this.makePrediction());
+        }
+        
+        if (batchPredictionBtn) {
+            batchPredictionBtn.addEventListener('click', () => this.makeBatchPrediction());
+        }
+    }
+    
+    async makePrediction() {
         const modelSelect = document.getElementById('prediction-model-select');
-        if (modelSelect) {
-            modelSelect.addEventListener('change', (e) => {
-                this.selectPredictionModel(e.target.value);
-            });
-        }
+        const featureInputs = document.querySelectorAll('.feature-input');
         
-        // Single prediction
-        const predictBtn = document.getElementById('make-prediction-btn');
-        if (predictBtn) {
-            predictBtn.addEventListener('click', () => this.makeSinglePrediction());
-        }
-        
-        // Batch prediction
-        const batchPredictBtn = document.getElementById('batch-prediction-btn');
-        if (batchPredictBtn) {
-            batchPredictBtn.addEventListener('click', () => this.makeBatchPrediction());
-        }
-        
-        // Clear predictions
-        const clearPredictionsBtn = document.getElementById('clear-predictions-btn');
-        if (clearPredictionsBtn) {
-            clearPredictionsBtn.addEventListener('click', () => this.clearPredictions());
-        }
-    }
-    
-    updatePredictionModels() {
-        const modelSelect = document.getElementById('prediction-model-select');
-        if (!modelSelect) return;
-        
-        // Clear existing options
-        modelSelect.innerHTML = '<option value="">Select a model...</option>';
-        
-        // Add trained models
-        Object.keys(this.modelResults).forEach(modelName => {
-            const option = document.createElement('option');
-            option.value = modelName;
-            option.textContent = modelName;
-            modelSelect.appendChild(option);
-        });
-        
-        // Update prediction interface visibility
-        const predictionInterface = document.getElementById('prediction-interface');
-        if (predictionInterface) {
-            predictionInterface.style.display = Object.keys(this.modelResults).length > 0 ? 'block' : 'none';
-        }
-    }
-    
-    selectPredictionModel(modelName) {
-        if (!modelName) return;
-        
-        this.selectedPredictionModel = modelName;
-        this.setupPredictionForm(modelName);
-        this.addActivityLog(`Selected model for prediction: ${modelName}`, 'info');
-    }
-    
-    setupPredictionForm(modelName) {
-        const formContainer = document.getElementById('prediction-form-container');
-        if (!formContainer || !this.datasetInfo) return;
-        
-        // Get feature columns (exclude target column if known)
-        const features = this.datasetInfo.columns.filter(col => 
-            col !== 'target' && col !== 'Target' && !col.toLowerCase().includes('target')
-        );
-        
-        let formHTML = '<div class="prediction-form"><h4>Enter Feature Values</h4>';
-        
-        features.forEach(feature => {
-            formHTML += `
-                <div class="form-group">
-                    <label for="feature-${feature}">${feature}:</label>
-                    <input type="number" id="feature-${feature}" name="${feature}" 
-                           class="form-control" step="any" required>
-                </div>
-            `;
-        });
-        
-        formHTML += '</div>';
-        formContainer.innerHTML = formHTML;
-    }
-    
-    async makeSinglePrediction() {
-        if (!this.selectedPredictionModel) {
-            this.showAlert('Please select a model first', 'warning');
+        if (!modelSelect || !modelSelect.value) {
+            this.showAlert('Please select a model for prediction', 'warning');
             return;
         }
+        
+        const features = {};
+        featureInputs.forEach(input => {
+            features[input.name] = parseFloat(input.value) || 0;
+        });
         
         try {
             this.showLoading('Making prediction...');
-            
-            // Collect feature values
-            const features = {};
-            const formInputs = document.querySelectorAll('#prediction-form-container input');
-            
-            for (const input of formInputs) {
-                if (!input.value) {
-                    throw new Error(`Please enter a value for ${input.name}`);
-                }
-                features[input.name] = parseFloat(input.value);
-            }
             
             const response = await fetch('/api/predict', {
                 method: 'POST',
@@ -942,7 +518,7 @@ class MLPipelineApp {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    model_name: this.selectedPredictionModel,
+                    model_name: modelSelect.value,
                     features: features
                 })
             });
@@ -962,168 +538,40 @@ class MLPipelineApp {
         }
     }
     
-    displayPredictionResult(result) {
-        const resultsDiv = document.getElementById('prediction-results');
-        if (!resultsDiv) return;
-        
-        const timestamp = new Date().toLocaleString();
-        
-        const resultHTML = `
-            <div class="prediction-result">
-                <div class="result-header">
-                    <h4>🎯 Prediction Result</h4>
-                    <span class="result-timestamp">${timestamp}</span>
-                </div>
-                <div class="result-content">
-                    <div class="prediction-value">
-                        <span class="value-label">Predicted Value:</span>
-                        <span class="value-number">${result.prediction.toFixed(4)}</span>
-                    </div>
-                    <div class="prediction-details">
-                        <div class="detail-item">
-                            <span class="detail-label">Model Used:</span>
-                            <span class="detail-value">${result.model_used}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Features Used:</span>
-                            <span class="detail-value">${Object.keys(result.features_used).length}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        resultsDiv.insertAdjacentHTML('afterbegin', resultHTML);
-    }
-    
-    async makeBatchPrediction() {
-        const fileInput = document.getElementById('batch-prediction-file');
-        if (!fileInput?.files[0]) {
-            this.showAlert('Please select a file for batch prediction', 'warning');
-            return;
-        }
-        
-        if (!this.selectedPredictionModel) {
-            this.showAlert('Please select a model first', 'warning');
+    async exportResults() {
+        if (!this.currentDataset) {
+            this.showAlert('No results to export', 'warning');
             return;
         }
         
         try {
-            this.showLoading('Processing batch predictions...');
-            
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            formData.append('model_name', this.selectedPredictionModel);
-            
-            const response = await fetch('/api/batch_predict', {
-                method: 'POST',
-                body: formData
-            });
-            
+            const response = await fetch(`/api/export_results/${this.currentDataset}`);
             const result = await response.json();
             
             if (result.success) {
-                this.displayBatchPredictionResults(result);
-                this.addActivityLog(`Batch prediction completed: ${result.predictions.length} predictions`, 'success');
+                this.showAlert('Results exported successfully', 'success');
+                this.addActivityLog('Results exported', 'success');
             } else {
-                throw new Error(result.error || 'Batch prediction failed');
+                throw new Error(result.error || 'Export failed');
             }
         } catch (error) {
-            this.showAlert(`Batch prediction failed: ${error.message}`, 'error');
-        } finally {
-            this.hideLoading();
+            this.showAlert(`Export failed: ${error.message}`, 'error');
         }
     }
-    
-    displayBatchPredictionResults(result) {
-        const resultsDiv = document.getElementById('batch-results');
-        if (!resultsDiv) return;
-        
-        let html = `
-            <div class="batch-prediction-results">
-                <h4>📊 Batch Prediction Results</h4>
-                <div class="batch-summary">
-                    <span>Total Predictions: ${result.predictions.length}</span>
-                    <span>Model Used: ${result.model_used}</span>
-                </div>
-        `;
-        
-        if (result.predictions.length <= 100) {
-            // Show detailed results for smaller batches
-            html += '<div class="predictions-table-container">';
-            html += '<table class="predictions-table">';
-            html += '<thead><tr><th>Row</th><th>Prediction</th></tr></thead><tbody>';
-            
-            result.predictions.forEach((pred, index) => {
-                html += `<tr><td>${index + 1}</td><td>${pred.toFixed(4)}</td></tr>`;
-            });
-            
-            html += '</tbody></table></div>';
-        } else {
-            // Show summary for larger batches
-            const stats = this.calculatePredictionStats(result.predictions);
-            html += `
-                <div class="predictions-summary">
-                    <div class="stat-item">
-                        <span class="stat-label">Mean:</span>
-                        <span class="stat-value">${stats.mean.toFixed(4)}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Std Dev:</span>
-                        <span class="stat-value">${stats.std.toFixed(4)}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Min:</span>
-                        <span class="stat-value">${stats.min.toFixed(4)}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Max:</span>
-                        <span class="stat-value">${stats.max.toFixed(4)}</span>
-                    </div>
-                </div>
-            `;
-        }
-        
-        html += `
-                <div class="batch-actions">
-                    <button class="btn btn-primary" onclick="mlApp.downloadBatchResults()">
-                        💾 Download Results
-                    </button>
-                </div>
-            </div>
-        `;
-        
-        resultsDiv.innerHTML = html;
-    }
-    
-    // =================
-    // SIDE PANEL SETUP
-    // =================
     
     setupSidePanelHandlers() {
         const panelToggle = document.getElementById('panel-toggle');
-        if (panelToggle) {
-            panelToggle.addEventListener('click', () => this.toggleSidePanel());
-        }
-    }
-    
-    toggleSidePanel() {
         const sidePanel = document.getElementById('side-panel');
-        if (!sidePanel) return;
         
-        sidePanel.classList.toggle('collapsed');
-        const toggle = document.getElementById('panel-toggle');
-        if (toggle) {
-            toggle.textContent = sidePanel.classList.contains('collapsed') ? '▶' : '◀';
+        if (panelToggle && sidePanel) {
+            panelToggle.addEventListener('click', () => {
+                sidePanel.classList.toggle('collapsed');
+                panelToggle.textContent = sidePanel.classList.contains('collapsed') ? '▶' : '◀';
+            });
         }
     }
-    
-    // =================
-    // MODAL SETUP
-    // =================
     
     setupModalHandlers() {
-        // Close modal handlers
         document.querySelectorAll('.modal-close').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const modal = e.target.closest('.modal');
@@ -1131,7 +579,6 @@ class MLPipelineApp {
             });
         });
         
-        // Click outside to close
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
@@ -1157,42 +604,27 @@ class MLPipelineApp {
         }
     }
     
-    showModelDetails(modelName) {
-        const modelData = this.modelResults[modelName];
-        if (!modelData) return;
+    initializeUI() {
+        this.updateConnectionStatus(false);
+        this.updateTrainingUI(false);
         
-        const modalBody = document.getElementById('model-details-body');
-        if (!modalBody) return;
+        const uploadSection = document.getElementById('upload-section');
+        if (uploadSection) {
+            uploadSection.classList.add('active');
+        }
         
-        modalBody.innerHTML = `
-            <div class="model-details">
-                <h4>${modelName}</h4>
-                <div class="metrics-grid">
-                    ${Object.entries(modelData).map(([metric, value]) => `
-                        <div class="metric-item">
-                            <span class="metric-label">${this.formatMetricName(metric)}:</span>
-                            <span class="metric-value">${this.formatMetric(value)}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-        
-        this.showModal('model-details-modal');
+        const firstTab = document.querySelector('.nav-tab');
+        if (firstTab) {
+            firstTab.classList.add('active');
+        }
     }
     
-    // =================
-    // UTILITY FUNCTIONS
-    // =================
-    
     switchSection(sectionName) {
-        // Update navigation
         document.querySelectorAll('.nav-tab').forEach(tab => {
             tab.classList.remove('active');
         });
         document.querySelector(`[data-section="${sectionName}"]`)?.classList.add('active');
         
-        // Update sections
         document.querySelectorAll('.section').forEach(section => {
             section.classList.remove('active');
         });
@@ -1203,107 +635,62 @@ class MLPipelineApp {
     }
     
     switchCleaningTab(tabName) {
-        // Update tab buttons
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.classList.remove('active');
+        document.querySelectorAll('.cleaning-tab').forEach(tab => {
+            tab.classList.remove('active');
         });
         document.querySelector(`[data-tab="${tabName}"]`)?.classList.add('active');
         
-        // Update tab content
-        document.querySelectorAll('.tab-content').forEach(content => {
+        document.querySelectorAll('.cleaning-content').forEach(content => {
             content.classList.remove('active');
         });
-        document.getElementById(`${tabName}-tab`)?.classList.add('active');
+        document.getElementById(`${tabName}-content`)?.classList.add('active');
     }
     
-    updateProgressBar(progress, message) {
-        const progressBar = document.querySelector('.progress-bar');
-        const progressText = document.querySelector('.progress-text');
-        const progressPercentage = document.querySelector('.progress-percentage');
-        
-        if (progressBar) {
-            progressBar.style.width = `${progress}%`;
-            progressBar.setAttribute('aria-valuenow', progress);
-        }
-        
-        if (progressText) {
-            progressText.textContent = message;
-        }
-        
-        if (progressPercentage) {
-            progressPercentage.textContent = `${progress}%`;
-        }
-    }
-    
-    updateTrainingUI(isTraining) {
-        const startBtn = document.getElementById('start-training');
-        const stopBtn = document.getElementById('stop-training');
-        
-        if (startBtn) {
-            startBtn.style.display = isTraining ? 'none' : 'inline-flex';
-            startBtn.disabled = isTraining;
-        }
-        
-        if (stopBtn) {
-            stopBtn.style.display = isTraining ? 'inline-flex' : 'none';
-        }
-        
-        // Update progress section visibility
-        const progressSection = document.getElementById('training-progress-section');
-        if (progressSection) {
-            progressSection.style.display = isTraining ? 'block' : 'none';
+    toggleAdvancedConfig(show) {
+        const advancedPanel = document.getElementById('advanced-config-panel');
+        if (advancedPanel) {
+            advancedPanel.style.display = show ? 'block' : 'none';
         }
     }
     
     showAlert(message, type = 'info') {
-        const alertsContainer = document.getElementById('notifications') || document.body;
+        const notifications = document.getElementById('notifications');
+        if (!notifications) return;
         
-        const alertDiv = document.createElement('div');
-        alertDiv.className = `alert alert-${type}`;
-        alertDiv.innerHTML = `
-            <div class="alert-content">
-                <span class="alert-icon">${this.getAlertIcon(type)}</span>
-                <span class="alert-message">${message}</span>
-                <button class="alert-close" onclick="this.parentElement.parentElement.remove()">×</button>
-            </div>
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type}`;
+        alert.innerHTML = `
+            <span class="alert-message">${message}</span>
+            <button class="alert-close">&times;</button>
         `;
         
-        alertsContainer.appendChild(alertDiv);
+        notifications.appendChild(alert);
         
-        // Auto-remove after delay
+        const closeBtn = alert.querySelector('.alert-close');
+        closeBtn.addEventListener('click', () => {
+            alert.remove();
+        });
+        
         setTimeout(() => {
-            if (alertDiv.parentElement) {
-                alertDiv.remove();
+            if (alert.parentNode) {
+                alert.remove();
             }
         }, this.config.ALERT_AUTO_REMOVE_DELAY);
-        
-        // Animate in
-        setTimeout(() => alertDiv.classList.add('show'), 10);
     }
     
-    getAlertIcon(type) {
-        const icons = {
-            success: '✅',
-            error: '❌',
-            warning: '⚠️',
-            info: 'ℹ️'
-        };
-        return icons[type] || icons.info;
-    }
-    
-    showLoading(message = 'Processing...') {
-        const loadingOverlay = document.getElementById('loading-overlay');
-        const loadingMessage = document.getElementById('loading-message');
-        const loadingTitle = document.getElementById('loading-title');
+    showLoading(title = 'Processing...', message = 'Please wait while we process your request.') {
+        const overlay = document.getElementById('loading-overlay');
+        const titleEl = document.getElementById('loading-title');
+        const messageEl = document.getElementById('loading-message');
         
-        if (loadingMessage) loadingMessage.textContent = message;
-        if (loadingTitle) loadingTitle.textContent = 'Processing...';
-        if (loadingOverlay) loadingOverlay.style.display = 'flex';
+        if (overlay) overlay.style.display = 'flex';
+        if (titleEl) titleEl.textContent = title;
+        if (messageEl) messageEl.textContent = message;
     }
     
     hideLoading() {
-        const loadingOverlay = document.getElementById('loading-overlay');
-        if (loadingOverlay) loadingOverlay.style.display = 'none';
+        const overlay = document.getElementById('loading-overlay');
+        if (overlay) overlay.style.display = 'none';
     }
     
     addActivityLog(message, type = 'info', progress = null) {
@@ -1313,19 +700,14 @@ class MLPipelineApp {
         const timestamp = new Date().toLocaleTimeString();
         const logItem = document.createElement('div');
         logItem.className = `activity-item activity-${type}`;
-        
         logItem.innerHTML = `
-            <div class="activity-header">
-                <span class="activity-icon">${this.getAlertIcon(type)}</span>
-                <span class="activity-time">${timestamp}</span>
-            </div>
+            <div class="activity-timestamp">${timestamp}</div>
             <div class="activity-message">${message}</div>
             ${progress !== null ? `<div class="activity-progress">${progress}%</div>` : ''}
         `;
         
         activityList.insertBefore(logItem, activityList.firstChild);
         
-        // Limit activity logs
         while (activityList.children.length > this.config.MAX_ACTIVITY_LOGS) {
             activityList.removeChild(activityList.lastChild);
         }
@@ -1365,7 +747,7 @@ class MLPipelineApp {
         
         const datasetsProcessed = document.getElementById('datasets-processed');
         if (datasetsProcessed) {
-            datasetsProcessed.textContent = '1'; // Current dataset
+            datasetsProcessed.textContent = '1';
         }
     }
     
@@ -1373,22 +755,32 @@ class MLPipelineApp {
         const previewContainer = document.getElementById('dataset-preview');
         if (!previewContainer || !preview) return;
         
+        // Ensure columns is always an array
+        let columns = preview.columns;
+        if (!Array.isArray(columns)) {
+            if (preview.sample_data && preview.sample_data.length > 0) {
+                columns = Object.keys(preview.sample_data[0]);
+            } else {
+                columns = [];
+            }
+        }
+        
         let html = `
             <div class="dataset-info">
                 <h4>📊 Dataset Preview</h4>
                 <div class="dataset-stats">
-                    <span class="stat-item">Rows: ${preview.shape[0]}</span>
-                    <span class="stat-item">Columns: ${preview.shape[1]}</span>
+                    <span class="stat-item">Rows: ${preview.shape ? preview.shape[0] : 'N/A'}</span>
+                    <span class="stat-item">Columns: ${preview.shape ? preview.shape[1] : columns.length}</span>
                 </div>
             </div>
         `;
         
-        if (preview.sample_data && preview.sample_data.length > 0) {
+        if (preview.sample_data && preview.sample_data.length > 0 && columns.length > 0) {
             html += '<div class="preview-table-container">';
             html += '<table class="preview-table">';
             html += '<thead><tr>';
             
-            preview.columns.forEach(col => {
+            columns.forEach(col => {
                 html += `<th>${col}</th>`;
             });
             
@@ -1396,19 +788,144 @@ class MLPipelineApp {
             
             preview.sample_data.slice(0, 5).forEach(row => {
                 html += '<tr>';
-                preview.columns.forEach(col => {
-                    html += `<td>${row[col] || '-'}</td>`;
+                columns.forEach(col => {
+                    const value = row[col];
+                    html += `<td>${value !== undefined && value !== null ? value : '-'}</td>`;
                 });
                 html += '</tr>';
             });
             
             html += '</tbody></table></div>';
+        } else {
+            html += '<p class="text-muted">No preview data available</p>';
         }
         
         previewContainer.innerHTML = html;
+        previewContainer.classList.add('show');
     }
     
-    // Health check system
+    displayOutliers(outliers) {
+        const outliersContainer = document.getElementById('outliers-display');
+        if (!outliersContainer) return;
+        
+        let html = '<div class="outliers-summary"><h4>🔍 Detected Outliers</h4>';
+        
+        if (Object.keys(outliers).length === 0) {
+            html += '<p>No outliers detected in the dataset.</p>';
+        } else {
+            html += '<div class="outliers-list">';
+            Object.entries(outliers).forEach(([column, indices]) => {
+                html += `
+                    <div class="outlier-column">
+                        <h5>${column}</h5>
+                        <p>${indices.length} outliers found at indices: ${indices.slice(0, 10).join(', ')}${indices.length > 10 ? '...' : ''}</p>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        }
+        
+        html += '</div>';
+        outliersContainer.innerHTML = html;
+    }
+    
+    displayCleaningResults(results) {
+        const resultsContainer = document.getElementById('cleaning-results');
+        if (!resultsContainer) return;
+        
+        let html = `
+            <div class="cleaning-results-summary">
+                <h4>🧹 Data Cleaning Results</h4>
+                <div class="shape-comparison">
+                    <span>Original: ${results.original_shape[0]} rows × ${results.original_shape[1]} columns</span>
+                    <span>→</span>
+                    <span>Final: ${results.final_shape[0]} rows × ${results.final_shape[1]} columns</span>
+                </div>
+                <div class="cleaning-operations">
+                    ${Object.entries(results.results).map(([operation, result]) => `
+                        <div class="operation-result">
+                            <strong>${operation}:</strong> ${JSON.stringify(result)}
+                        </div>
+                    `).join('')}
+                </div>
+                ${results.cleaning_summary ? this.renderCleaningSummary(results.cleaning_summary) : ''}
+            </div>
+        `;
+        
+        resultsContainer.innerHTML = html;
+    }
+    
+    displayTrainingResults(data) {
+        const resultsContainer = document.getElementById('training-results');
+        if (!resultsContainer) return;
+        
+        let html = '<div class="training-results-summary"><h4>🎯 Training Results</h4>';
+        
+        if (data.model_summary) {
+            html += '<div class="models-grid">';
+            Object.entries(data.model_summary).forEach(([model, metrics]) => {
+                html += `
+                    <div class="model-card" onclick="app.showModelDetails('${model}')">
+                        <h5>${model}</h5>
+                        <div class="model-metrics">
+                            ${Object.entries(metrics).slice(0, 3).map(([metric, value]) => `
+                                <div class="metric">
+                                    <span class="metric-name">${metric}:</span>
+                                    <span class="metric-value">${this.formatMetric(value)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        }
+        
+        html += '</div>';
+        resultsContainer.innerHTML = html;
+        
+        if (data.plots) {
+            this.displayVisualizations(data.plots);
+        }
+    }
+    
+    displayPredictionResult(result) {
+        const resultsDiv = document.getElementById('prediction-result');
+        if (!resultsDiv) return;
+        
+        resultsDiv.innerHTML = `
+            <div class="prediction-result-card">
+                <h4>🔮 Prediction Result</h4>
+                <div class="prediction-value">
+                    <span class="prediction-label">Predicted Value:</span>
+                    <span class="prediction-number">${result.prediction.toFixed(4)}</span>
+                </div>
+                <div class="prediction-details">
+                    <p><strong>Model Used:</strong> ${result.model_used}</p>
+                    <p><strong>Features:</strong> ${Object.entries(result.features_used).map(([k,v]) => `${k}: ${v}`).join(', ')}</p>
+                </div>
+            </div>
+        `;
+    }
+    
+    displayVisualizations(plots) {
+        const plotsContainer = document.getElementById('visualizations-container');
+        if (!plotsContainer) return;
+        
+        let html = '<div class="plots-grid">';
+        Object.entries(plots).forEach(([plotName, plotData]) => {
+            html += `
+                <div class="plot-card">
+                    <h5>${plotName}</h5>
+                    <div class="plot-container" id="plot-${plotName}"></div>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        plotsContainer.innerHTML = html;
+    }
+    
     async startHealthCheck() {
         this.healthCheckInterval = setInterval(async () => {
             try {
@@ -1416,7 +933,6 @@ class MLPipelineApp {
                 const result = await response.json();
                 
                 if (result.status === 'healthy') {
-                    // Update health indicator
                     const healthIndicator = document.getElementById('health-indicator');
                     if (healthIndicator) {
                         const statusDot = healthIndicator.querySelector('.status-dot');
@@ -1426,7 +942,6 @@ class MLPipelineApp {
                         if (statusText) statusText.textContent = 'Healthy';
                     }
                     
-                    // Update active sessions
                     const activeSessions = document.getElementById('active-sessions');
                     if (activeSessions) {
                         activeSessions.textContent = result.active_sessions || 0;
@@ -1446,142 +961,42 @@ class MLPipelineApp {
         }, this.config.HEALTH_CHECK_INTERVAL);
     }
     
-    // Formatting utilities
     formatMetric(value) {
         if (value === null || value === undefined || isNaN(value)) {
             return 'N/A';
         }
-        return typeof value === 'number' ? value.toFixed(4) : value;
+        return typeof value === 'number' ? value.toFixed(4) : value.toString();
     }
     
     formatMetricName(name) {
-        const nameMap = {
-            'r2': 'R² Score',
-            'mse': 'MSE',
-            'mae': 'MAE',
-            'rmse': 'RMSE',
-            'cv_score': 'CV Score',
-            'cv_std': 'CV Std Dev'
-        };
-        return nameMap[name] || name.replace('_', ' ').toUpperCase();
+        return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
     
-    formatBytes(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    renderCleaningSummary(summary) {
+        return `
+            <div class="cleaning-summary">
+                <h5>Cleaning Summary</h5>
+                <pre>${JSON.stringify(summary, null, 2)}</pre>
+            </div>
+        `;
     }
     
-    formatPlotTitle(plotType) {
-        const titleMap = {
-            'correlation_heatmap': '🔥 Correlation Heatmap',
-            'feature_importance': '⭐ Feature Importance',
-            'residuals_plot': '📈 Residuals Analysis',
-            'prediction_vs_actual': '🎯 Predictions vs Actual',
-            'model_comparison': '📊 Model Comparison',
-            'learning_curves': '📈 Learning Curves'
-        };
-        return titleMap[plotType] || plotType.replace('_', ' ').toUpperCase();
+    handleDataUpdate(data) {
+        console.log('Data update received:', data);
+        this.addActivityLog('Data updated', 'info');
     }
     
-    calculatePredictionStats(predictions) {
-        const mean = predictions.reduce((a, b) => a + b, 0) / predictions.length;
-        const variance = predictions.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / predictions.length;
-        const std = Math.sqrt(variance);
-        const min = Math.min(...predictions);
-        const max = Math.max(...predictions);
-        
-        return { mean, std, min, max };
+    updateSystemStatus(data) {
+        console.log('System status update:', data);
     }
     
-    // Initialize UI components
-    initializeUI() {
-        // Set up uptime counter
-        this.startTime = Date.now();
-        setInterval(() => {
-            const uptimeSpan = document.getElementById('uptime');
-            if (uptimeSpan) {
-                const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-                const minutes = Math.floor(uptime / 60);
-                const seconds = uptime % 60;
-                uptimeSpan.textContent = `${minutes}m ${seconds}s`;
-            }
-        }, 1000);
-        
-        // Initialize tooltips and help text
-        this.initializeTooltips();
-        
-        // Set initial UI state
-        this.switchSection('upload');
+    makeBatchPrediction() {
+        this.showAlert('Batch prediction feature coming soon!', 'info');
     }
     
-    initializeTooltips() {
-        // Add tooltips to metric headers and important elements
-        const tooltips = {
-            'r2': 'R-squared: Coefficient of determination (0-1, higher is better)',
-            'mse': 'Mean Squared Error: Average squared differences (lower is better)', 
-            'mae': 'Mean Absolute Error: Average absolute differences (lower is better)',
-            'rmse': 'Root Mean Squared Error: Square root of MSE (lower is better)',
-            'cv_score': 'Cross-validation Score: Average performance across folds'
-        };
-        
-        Object.entries(tooltips).forEach(([key, text]) => {
-            const elements = document.querySelectorAll(`[data-metric="${key}"]`);
-            elements.forEach(el => {
-                el.title = text;
-            });
-        });
-    }
-    
-    // Cleanup on page unload
-    cleanup() {
-        if (this.healthCheckInterval) {
-            clearInterval(this.healthCheckInterval);
-        }
-        
-        if (this.socket) {
-            this.socket.disconnect();
-        }
+    downloadModel() {
+        this.showAlert('Model download feature coming soon!', 'info');
     }
 }
 
-let mlApp;
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        mlApp = new MLPipelineApp();
-    });
-} else {
-    mlApp = new MLPipelineApp();
-}
-
-// Handle page unload
-window.addEventListener('beforeunload', () => {
-    if (mlApp) {
-        mlApp.cleanup();
-    }
-});
-
-// Export for global access
-window.mlApp = mlApp;
-
-// Additional utility functions for global access
-window.downloadPlot = function(plotType) {
-    if (mlApp) {
-        mlApp.downloadPlot(plotType);
-    }
-};
-
-window.expandPlot = function(plotType) {
-    if (mlApp) {
-        mlApp.expandPlot(plotType);
-    }
-};
-
-window.useModelForPrediction = function(modelName) {
-    if (mlApp) {
-        mlApp.useModelForPrediction(modelName);
-        mlApp.switchSection('prediction');
-    }
-};
+const app = new MLPipelineApp();
