@@ -14,6 +14,7 @@ class MLPipelineApp {
         this.healthCheckInterval = null;
         this.connectionEstablished = false;
         this.isUploading = false;
+        this.availableModels = [];
         
         this.config = {
             ALERT_AUTO_REMOVE_DELAY: 5000,
@@ -29,6 +30,7 @@ class MLPipelineApp {
         this.setupEventListeners();
         this.setupWebSocketHandlers();
         this.initializeUI();
+        this.loadAvailableModels(); 
         this.startHealthCheck();
         console.log('🚀 ML Pipeline Application Initialized');
     }
@@ -398,6 +400,8 @@ class MLPipelineApp {
             return;
         }
         
+        const targetColumnSelect = document.getElementById('target-column');
+        
         try {
             this.trainingInProgress = true;
             this.updateTrainingUI(true);
@@ -407,6 +411,7 @@ class MLPipelineApp {
             this.socket.emit('start_training', {
                 session_id: this.sessionId,
                 dataset: this.currentDataset,
+                target_column: targetColumnSelect.value || "",
                 config: config
             });
             
@@ -459,6 +464,23 @@ class MLPipelineApp {
             this.showAlert('Training completed, but there was an error displaying results', 'warning');
         }
     }
+
+    async loadAvailableModels() {
+        try {
+            const response = await fetch('/api/models');
+            const result = await response.json();
+            
+            if (result.success) {
+                this.availableModels = result.models;
+                this.updatePredictionModelSelect();
+                console.log('Loaded models:', this.availableModels);
+            } else {
+                console.warn('Failed to load models:', result.error);
+            }
+        } catch (error) {
+            console.error('Error loading models:', error);
+        }
+    }
     
     handleTrainingError(error) {
         this.trainingInProgress = false;
@@ -502,12 +524,19 @@ class MLPipelineApp {
             this.showAlert('Please select a model for prediction', 'warning');
             return;
         }
-        
+
+        const emptyInputs = Array.from(featureInputs).filter(input => !input.value.trim());
+        if (emptyInputs.length > 0) {
+            this.showAlert('Please fill in all feature values', 'warning');
+            emptyInputs[0].focus();
+            return;
+        }
+
         const features = {};
         featureInputs.forEach(input => {
             features[input.name] = parseFloat(input.value) || 0;
         });
-        
+
         try {
             this.showLoading('Making prediction...');
             
@@ -521,19 +550,20 @@ class MLPipelineApp {
                     features: features
                 })
             });
-            
+
             const result = await response.json();
-            
+            this.hideLoading();
+
             if (result.success) {
                 this.displayPredictionResult(result);
-                this.addActivityLog(`Prediction made: ${result.prediction}`, 'success');
+                this.addActivityLog(`Prediction made: ${result.prediction.toFixed(4)}`, 'success');
             } else {
                 throw new Error(result.error || 'Prediction failed');
             }
         } catch (error) {
-            this.showAlert(`Prediction failed: ${error.message}`, 'error');
-        } finally {
             this.hideLoading();
+            console.error('Prediction error:', error);
+            this.showAlert(`Prediction failed: ${error.message}`, 'error');
         }
     }
     
@@ -1149,11 +1179,11 @@ class MLPipelineApp {
                 html += `<div class="viz-content">`;
                 
                 if (plotData && plotData !== 'No data available') {
-                    if (plotData.startsWith('static/') || plotData.startsWith('/static/')) {
-                        // Image path
-                        html += `<img src="${plotData}" alt="${plotType}" style="max-width: 100%; height: auto;">`;
+                    if (plotData.startsWith('/static/plots/') || plotData.startsWith('static/plots/')) {
+                        const imageUrl = plotData.startsWith('/') ? plotData : `/${plotData}`;
+                        html += `<img src="${imageUrl}" alt="${plotType}" style="max-width: 100%; height: auto;" 
+                                onerror="this.onerror=null; this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjNmNGY2Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iIzY2NzI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkltYWdlIG5vdCBhdmFpbGFibGU8L3RleHQ+PC9zdmc+';">`;
                     } else {
-                        // Plot data or placeholder
                         html += `<div class="viz-placeholder">📊 ${plotData}</div>`;
                     }
                 } else {
@@ -1165,7 +1195,7 @@ class MLPipelineApp {
             
             html += '</div>';
         } else {
-            html += '<div class="no-visualizations">No visualizations available</div>';
+            html += '<div class="no-visualizations">No visualizations available. Plots will be generated after training.</div>';
         }
 
         html += '</div>';
@@ -1176,19 +1206,74 @@ class MLPipelineApp {
         const modelSelect = document.getElementById('prediction-model-select');
         if (!modelSelect) return;
 
-        // Clear existing options except the first one
         modelSelect.innerHTML = '<option value="">Choose a trained model...</option>';
 
-        // Add model options
-        this.predictionModels.forEach(modelName => {
+        this.availableModels.forEach(model => {
             const option = document.createElement('option');
-            option.value = modelName;
-            option.textContent = modelName;
+            option.value = model.name;
+            option.textContent = model.display_name;
             modelSelect.appendChild(option);
         });
 
-        // Update feature inputs based on dataset info
-        this.updateFeatureInputs();
+        if (this.datasetInfo && this.datasetInfo.features) {
+            this.updateFeatureInputs();
+        }
+    }
+
+    async handlePredictionModelChange(event) {
+        const modelName = event.target.value;
+        if (!modelName) {
+            this.clearFeatureInputs();
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/models/${modelName}`);
+            const result = await response.json();
+            
+            if (result.success) {
+                const model = result.model;
+                this.updateFeatureInputsForModel(model.feature_names);
+                this.showAlert(`Selected model: ${model.display_name}`, 'info');
+            } else {
+                this.showAlert('Failed to load model details', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading model details:', error);
+            this.showAlert('Error loading model details', 'error');
+        }
+    }
+
+    updateFeatureInputsForModel(featureNames) {
+        const featureInputsContainer = document.getElementById('feature-inputs');
+        if (!featureInputsContainer || !featureNames || featureNames.length === 0) {
+            this.clearFeatureInputs();
+            return;
+        }
+
+        let html = '<h4>Enter Feature Values</h4>';
+        html += '<div class="feature-input-grid">';
+
+        featureNames.forEach(feature => {
+            html += `<div class="input-group">`;
+            html += `<label for="feature-${feature}">${feature}</label>`;
+            html += `<input type="number" id="feature-${feature}" name="${feature}" 
+                    class="feature-input" step="any" placeholder="Enter ${feature}" required>`;
+            html += `</div>`;
+        });
+
+        html += '</div>';
+        
+        html += '<div id="prediction-result" style="margin-top: 1rem;"></div>';
+        
+        featureInputsContainer.innerHTML = html;
+    }
+
+    clearFeatureInputs() {
+        const featureInputsContainer = document.getElementById('feature-inputs');
+        if (featureInputsContainer) {
+            featureInputsContainer.innerHTML = '<p class="text-muted">Please select a trained model to enable predictions.</p>';
+        }
     }
 
     updateFeatureInputs() {
@@ -1215,19 +1300,173 @@ class MLPipelineApp {
         if (!resultContainer) return;
 
         const html = `
-            <div class="prediction-result">
+            <div class="prediction-result-card">
                 <h4>🔮 Prediction Result</h4>
                 <div class="result-value">
-                    <strong>${result.prediction.toFixed(4)}</strong>
+                    <span class="result-number">${result.prediction.toFixed(4)}</span>
                 </div>
                 <div class="result-meta">
-                    <span>Model: ${result.model_name}</span>
-                    <span>Confidence: ${(result.confidence || 0.95).toFixed(3)}</span>
+                    <div class="meta-row">
+                        <span class="meta-label">Model:</span>
+                        <span class="meta-value">${result.model_name.replace(/_/g, ' ')}</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Confidence:</span>
+                        <span class="meta-value">${(result.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="meta-label">Features Used:</span>
+                        <span class="meta-value">${Object.keys(result.features_used).length}</span>
+                    </div>
                 </div>
             </div>
         `;
         
         resultContainer.innerHTML = html;
+        
+        resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    async makeBatchPrediction() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.csv';
+        input.onchange = (e) => this.handleBatchPredictionFile(e);
+        input.click();
+    }
+
+    async handleBatchPredictionFile(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const modelSelect = document.getElementById('prediction-model-select');
+        if (!modelSelect || !modelSelect.value) {
+            this.showAlert('Please select a model first', 'warning');
+            return;
+        }
+
+        try {
+            this.showLoading('Processing batch predictions...');
+            
+            // Read CSV file
+            const text = await file.text();
+            const lines = text.split('\n').filter(line => line.trim());
+            const headers = lines[0].split(',').map(h => h.trim());
+            
+            const csvData = lines.slice(1).map(line => {
+                const values = line.split(',');
+                const row = {};
+                headers.forEach((header, index) => {
+                    row[header] = values[index] ? parseFloat(values[index].trim()) || values[index].trim() : 0;
+                });
+                return row;
+            });
+
+            const response = await fetch('/api/batch_predict', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model_name: modelSelect.value,
+                    csv_data: csvData
+                })
+            });
+
+            const result = await response.json();
+            this.hideLoading();
+
+            if (result.success) {
+                this.displayBatchPredictionResults(result);
+                this.addActivityLog(`Batch prediction completed: ${result.total_predictions} predictions`, 'success');
+            } else {
+                throw new Error(result.error || 'Batch prediction failed');
+            }
+        } catch (error) {
+            this.hideLoading();
+            console.error('Batch prediction error:', error);
+            this.showAlert(`Batch prediction failed: ${error.message}`, 'error');
+        }
+    }
+
+    displayBatchPredictionResults(result) {
+        const modal = document.createElement('div');
+        modal.className = 'batch-results-modal';
+        modal.innerHTML = `
+            <div class="batch-results-content">
+                <div class="batch-results-header">
+                    <h3>Batch Prediction Results</h3>
+                    <button class="close-batch-results">&times;</button>
+                </div>
+                <div class="batch-results-summary">
+                    <p>Total predictions: <strong>${result.total_predictions}</strong></p>
+                    <p>Model used: <strong>${result.model_used}</strong></p>
+                </div>
+                <div class="batch-results-table">
+                    <button class="download-csv-btn">Download Results as CSV</button>
+                    <div class="table-container">
+                        ${this.createBatchResultsTable(result.predictions)}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Add event listeners
+        modal.querySelector('.close-batch-results').onclick = () => modal.remove();
+        modal.querySelector('.download-csv-btn').onclick = () => this.downloadBatchResults(result.predictions);
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    }
+
+    createBatchResultsTable(predictions) {
+        if (!predictions || predictions.length === 0) return '<p>No predictions available</p>';
+        
+        const headers = Object.keys(predictions[0]);
+        let html = '<table class="batch-results-table"><thead><tr>';
+        
+        headers.forEach(header => {
+            html += `<th>${header}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+        
+        predictions.slice(0, 100).forEach(prediction => { // Limit display to first 100
+            html += '<tr>';
+            headers.forEach(header => {
+                const value = prediction[header];
+                const displayValue = typeof value === 'number' ? value.toFixed(4) : value;
+                html += `<td>${displayValue}</td>`;
+            });
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        
+        if (predictions.length > 100) {
+            html += `<p class="table-note">Showing first 100 results of ${predictions.length}</p>`;
+        }
+        
+        return html;
+    }
+
+    downloadBatchResults(predictions) {
+        if (!predictions || predictions.length === 0) return;
+        
+        const headers = Object.keys(predictions[0]);
+        let csv = headers.join(',') + '\n';
+        
+        predictions.forEach(prediction => {
+            const row = headers.map(header => prediction[header]).join(',');
+            csv += row + '\n';
+        });
+        
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `batch_predictions_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
     }
 
     formatPlotTitle(plotType) {

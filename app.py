@@ -1,4 +1,5 @@
 from flask_socketio import join_room, leave_room
+from flask import send_from_directory
 import time
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
@@ -349,31 +350,19 @@ def handle_disconnect():
 @socketio.on('start_training')
 def handle_training(data):
     session_id = data.get('session_id')
-    dataset = data.get('dataset')
-    config = data.get('config', {})
-    join_room(session_id)
-    
-    default_config = {
-        'test_size': 0.2,
-        'random_state': 42,
-        'cross_validation_folds': 5,
-        'feature_selection_k': 'all',
-        'scaling_method': 'standard',
-        'hyperparameter_tuning': True,
-        'feature_engineering': True,
-        'model_evaluation_metrics': ['r2', 'mse', 'mae', 'rmse', 'explained_variance']
-    }
-    
-    for key, value in default_config.items():
-        if key not in config:
-            config[key] = value
+    if not session_id:
+        emit('training_error', {'error': 'No session ID provided'})
+        return
     
     session = backend_manager.get_session(session_id)
     if not session:
-        with app.app_context():
-            emit('training_error', {'error': 'Invalid session'})
+        emit('training_error', {'error': 'Invalid session'})
         return
     
+    dataset = data.get('dataset')
+    target_column = data.get('target_column')
+    config = data.get('config', {})
+
     def training_worker():
         try:
             dataset_path = os.path.join('data', dataset)
@@ -382,12 +371,13 @@ def handle_training(data):
                     socketio.emit('training_error', {'error': 'Dataset not found'}, room=session_id)
                 return
             
+            dataset_name = dataset.replace('.csv', '') if dataset.endswith('.csv') else dataset
+            
             pipeline = RegressionPipeline(config)
             
             def progress_callback(message, progress):
                 backend_manager.emit_progress(session_id, message, progress)
-            
-            # Load and preprocess data
+                    
             backend_manager.emit_progress(session_id, "Loading and preprocessing data...", 10)
             try:
                 X, y, df = pipeline.load_and_preprocess_data(dataset_path)
@@ -401,7 +391,7 @@ def handle_training(data):
                 pipeline.data_info = {
                     'shape': df.shape,
                     'features': list(X.columns) if hasattr(X, 'columns') else [],
-                    'target_column': 'target',
+                    'target_column': target_column,
                     'missing_values': df.isnull().sum().sum()
                 }
                 
@@ -419,15 +409,6 @@ def handle_training(data):
                 # Debug logging
                 logger.info(f"Raw results type: {type(results)}")
                 logger.info(f"Raw results keys: {list(results.keys()) if isinstance(results, dict) else 'Not a dict'}")
-                
-                # ✅ FIXED: Now results should be properly returned
-                if not results:
-                    logger.warning("No results returned from training")
-                    results = {
-                        'training_completed': True,
-                        'models_trained': 0,
-                        'error': 'No models were successfully trained'
-                    }
                 
                 # Process the model results properly
                 model_summary = {}
@@ -452,7 +433,7 @@ def handle_training(data):
                     'dataset_info': {
                         'shape': list(pipeline.data_info.get('shape', [0, 0])),
                         'features': pipeline.data_info.get('features', []),
-                        'target_column': pipeline.data_info.get('target_column', 'Unknown')
+                        'target_column': target_column
                     }
                 }
                 
@@ -463,15 +444,16 @@ def handle_training(data):
                     'models_trained': 0
                 }
             
-            # Generate plots
+            # Generate plots with proper dataset_name
             backend_manager.emit_progress(session_id, "Generating visualizations...", 80)
             plots = {}
             try:
-                plots = {
-                    'model_comparison': 'Model comparison plot data',
-                    'feature_importance': 'Feature importance plot data',
-                    'residual_plots': 'Residual plots data'
-                }
+                if hasattr(pipeline, 'generate_plots'):
+                    plots = pipeline.generate_plots(dataset_name, progress_callback)
+                    logger.info(f"Generated plots: {list(plots.keys())}")
+                else:
+                    logger.warning("Pipeline does not have generate_plots method")
+                    plots = {}
             except Exception as plot_error:
                 logger.warning(f"Plot generation failed: {plot_error}")
                 plots = {}
@@ -492,6 +474,154 @@ def handle_training(data):
     training_thread = threading.Thread(target=training_worker)
     training_thread.daemon = True
     training_thread.start()
+
+@app.route('/static/plots/<filename>')
+def serve_plot(filename):
+    """Serve plot images from static/plots directory"""
+    return send_from_directory('static/plots', filename)
+
+@app.route('/api/models')
+def list_models():
+    """List all available trained models"""
+    try:
+        models_dir = 'models'
+        if not os.path.exists(models_dir):
+            os.makedirs(models_dir, exist_ok=True)
+            return jsonify({'success': True, 'models': []})
+        
+        model_files = [f for f in os.listdir(models_dir) if f.endswith('.pkl')]
+        models = []
+        
+        for model_file in model_files:
+            try:
+                model_path = os.path.join(models_dir, model_file)
+                with open(model_path, 'rb') as f:
+                    model_data = pickle.load(f)
+                
+                model_name = model_file.replace('.pkl', '')
+                model_info = {
+                    'name': model_name,
+                    'display_name': model_name.replace('_', ' ').title(),
+                    'metrics': model_data.get('metrics', {}),
+                    'feature_names': model_data.get('feature_names', []),
+                    'timestamp': model_data.get('timestamp', 'Unknown'),
+                    'config': model_data.get('config', {})
+                }
+                models.append(model_info)
+                
+            except Exception as e:
+                logger.warning(f"Failed to load model {model_file}: {e}")
+                continue
+        
+        # Sort by timestamp (newest first)
+        models.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'models': models,
+            'count': len(models)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing models: {str(e)}")
+        return jsonify({'error': f'Failed to list models: {str(e)}'}), 500
+
+@app.route('/api/models/<model_name>')
+def get_model_details(model_name):
+    """Get detailed information about a specific model"""
+    try:
+        model_path = os.path.join('models', f'{model_name}.pkl')
+        if not os.path.exists(model_path):
+            return jsonify({'error': 'Model not found'}), 404
+        
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        # Find associated plots
+        plots_dir = 'static/plots'
+        plots = {}
+        if os.path.exists(plots_dir):
+            plot_files = os.listdir(plots_dir)
+            for plot_file in plot_files:
+                if model_name.lower() in plot_file.lower() or 'model_comparison' in plot_file:
+                    plot_type = plot_file.split('_')[-1].replace('.png', '')
+                    plots[plot_type] = f'/static/plots/{plot_file}'
+        
+        model_details = {
+            'name': model_name,
+            'display_name': model_name.replace('_', ' ').title(),
+            'metrics': convert_numpy_types(model_data.get('metrics', {})),
+            'feature_names': model_data.get('feature_names', []),
+            'timestamp': model_data.get('timestamp', 'Unknown'),
+            'config': model_data.get('config', {}),
+            'plots': plots
+        }
+        
+        return jsonify({
+            'success': True,
+            'model': model_details
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting model details for {model_name}: {str(e)}")
+        return jsonify({'error': f'Failed to get model details: {str(e)}'}), 500
+
+@app.route('/api/batch_predict', methods=['POST'])
+def make_batch_prediction():
+    """Handle batch predictions from uploaded CSV"""
+    try:
+        data = request.get_json()
+        model_name = data.get('model_name')
+        csv_data = data.get('csv_data', [])
+        
+        if not model_name:
+            return jsonify({'error': 'Model name is required'}), 400
+        
+        if not csv_data:
+            return jsonify({'error': 'CSV data is required'}), 400
+        
+        model_path = os.path.join('models', f'{model_name}.pkl')
+        if not os.path.exists(model_path):
+            return jsonify({'error': 'Model not found'}), 404
+        
+        with open(model_path, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        model = model_data['model']
+        scaler = model_data.get('scaler')
+        feature_names = model_data.get('feature_names', [])
+        
+        df = pd.DataFrame(csv_data)
+        missing_features = [fn for fn in feature_names if fn not in df.columns]
+        if missing_features:
+            return jsonify({
+                'error': f'Missing required features in CSV: {", ".join(missing_features)}',
+                'required_features': feature_names
+            }), 400
+        
+        X = df[feature_names].values
+        
+        if scaler:
+            X = scaler.transform(X)
+        
+        predictions = model.predict(X)
+        
+        results = []
+        for i, prediction in enumerate(predictions):
+            result_row = df.iloc[i].to_dict()
+            result_row['prediction'] = float(prediction)
+            results.append(result_row)
+        
+        return jsonify({
+            'success': True,
+            'predictions': results,
+            'model_used': model_name,
+            'total_predictions': len(results)
+        })
+        
+    except Exception as e:
+        logger.error(f"Batch prediction error: {str(e)}")
+        return jsonify({'error': f'Batch prediction failed: {str(e)}'}), 500
 
 @app.errorhandler(413)
 def too_large(e):

@@ -138,6 +138,16 @@
 
                 <div class="training-config">
                     <h3>Training Configuration</h3>
+                    <div class="config-group">
+                        <h4>📋 Dataset Configuration</h4>
+                        <div class="section-actions">
+                            <label for="target-column">Target Column:</label>
+                            <small class="help-text">Choose the column you want to predict</small>
+                        </div>
+                        <select id="target-column" class="form-select">
+                            <option value="">Select target column...</option>
+                        </select>
+                    </div>
                     <form id="training-config-form">
                         <div class="config-groups">
                             <div class="config-group">
@@ -234,17 +244,16 @@
                         </div>
 
                         <div class="feature-inputs" id="feature-inputs">
-                            <p class="text-muted">Please train a model first to enable predictions.</p>
+                            <p class="text-muted">Please select a trained model to enable predictions.</p>
                         </div>
 
-                        <button id="make-prediction" class="btn btn-primary">🔮 Make Prediction</button>
+                        <button id="make-prediction" class="btn btn-primary" style="margin-top: 1rem;">
+                            🎯 Make Prediction
+                        </button>
+                        
+                        <div id="prediction-result"></div>
                     </div>
-
-                    <div id="prediction-result"></div>
                 </div>
-
-                <div id="batch-results"></div>
-                <input type="file" id="batch-file-input" accept=".csv" style="display: none;">
             </section>
         </div>
 
