@@ -17,32 +17,35 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'
 app.config['UPLOAD_FOLDER'] = 'data'
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
-
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
-
 for dir_name in ['data', 'models', 'static/plots', 'temp']:
     os.makedirs(dir_name, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif hasattr(obj, 'dtype'):
-            return str(obj)
-        elif isinstance(obj, pd.Timestamp):
-            return obj.isoformat()
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
-
-app.json_encoder = CustomJSONEncoder
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+def convert_numpy_types(obj):
+    """Recursively convert numpy types to Python native types"""
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy_types(item) for item in obj)
+    elif isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif hasattr(obj, 'item'):  # numpy scalar
+        return obj.item()
+    elif hasattr(obj, 'dtype'):
+        return str(obj)
+    else:
+        return obj
 
 class BackendManager:
     def __init__(self):
@@ -64,12 +67,32 @@ class BackendManager:
     
     def emit_progress(self, session_id, message, progress, data=None):
         with app.app_context():
-            socketio.emit('training_progress', {
-                'message': message,
-                'progress': progress,
-                'data': data,
-                'timestamp': datetime.now().isoformat()
-            }, room=session_id)
+            try:
+                # Convert data to JSON-safe format before emitting
+                safe_data = convert_numpy_types(data) if data else None
+                
+                # Test JSON serialization before emitting
+                test_payload = {
+                    'message': message,
+                    'progress': progress,
+                    'data': safe_data,
+                    'timestamp': datetime.now().isoformat()
+                }
+                json.dumps(test_payload) 
+                
+                socketio.emit('training_progress', test_payload, room=session_id)
+                
+            except (TypeError, ValueError) as e:
+                logger.error(f"JSON serialization error in emit_progress: {e}")
+                logger.error(f"Problematic data: {data}")
+                
+                # Fallback: emit without data
+                socketio.emit('training_progress', {
+                    'message': message,
+                    'progress': progress,
+                    'data': {'error': 'Data serialization failed'},
+                    'timestamp': datetime.now().isoformat()
+                }, room=session_id)
 
 backend_manager = BackendManager()
 
@@ -389,6 +412,10 @@ def handle_training(data):
             try:
                 results = pipeline.train_models(X, y, progress_callback)
                 
+                # Debug logging
+                logger.info(f"Raw results type: {type(results)}")
+                logger.info(f"Raw results keys: {list(results.keys()) if isinstance(results, dict) else 'Not a dict'}")
+                
                 # If train_models returns None or empty, use pipeline attributes
                 if not results:
                     results = getattr(pipeline, 'results', {})
@@ -398,7 +425,7 @@ def handle_training(data):
                     results = {
                         'training_completed': True,
                         'models_trained': len(pipeline.algorithms),
-                        'best_model_name': getattr(pipeline, 'best_model', 'Unknown'),
+                        'best_model_name': str(getattr(pipeline, 'best_model', 'Unknown')),
                         'best_score': float(getattr(pipeline, 'best_score', 0.0))
                     }
                 
@@ -406,8 +433,14 @@ def handle_training(data):
                 if hasattr(pipeline, 'trained_models') and pipeline.trained_models:
                     model_summaries = {}
                     for model_name, model_info in pipeline.trained_models.items():
+                        logger.info(f"Processing model {model_name}, info type: {type(model_info)}")
                         if isinstance(model_info, dict):
-                            model_summaries[model_name] = model_info
+                            # Convert each metric to safe type
+                            safe_info = {}
+                            for metric_name, metric_value in model_info.items():
+                                logger.info(f"Metric {metric_name}: {type(metric_value)} = {metric_value}")
+                                safe_info[metric_name] = convert_numpy_types(metric_value)
+                            model_summaries[model_name] = safe_info
                         else:
                             model_summaries[model_name] = {'trained': True}
                     results['model_summaries'] = model_summaries
@@ -433,45 +466,23 @@ def handle_training(data):
                 logger.warning(f"Plot generation failed: {plot_error}")
                 plots = {}
             
-            # Prepare results
             backend_manager.emit_progress(session_id, "Finalizing results...", 90)
+            json_safe_summary = convert_numpy_types(results)
+            try:
+                json.dumps(json_safe_summary)
+                logger.info("Results successfully converted to JSON-safe format")
+            except TypeError as e:
+                logger.error(f"Still have JSON serialization issues: {e}")
+                # Final fallback - convert everything to strings
+                json_safe_summary = {str(k): str(v) for k, v in results.items()}
             
-            json_safe_summary = {}
-            for key, value in results.items():
-                try:
-                    json.dumps(value)
-                    json_safe_summary[key] = value
-                except TypeError:
-                    if isinstance(value, dict):
-                        # Handle nested dictionaries with numpy types
-                        safe_dict = {}
-                        for k, v in value.items():
-                            if isinstance(v, (np.integer, np.int64, np.int32)):
-                                safe_dict[k] = int(v)
-                            elif isinstance(v, (np.floating, np.float64, np.float32)):
-                                safe_dict[k] = float(v)
-                            elif isinstance(v, np.ndarray):
-                                safe_dict[k] = v.tolist()
-                            elif hasattr(v, 'item'):  # numpy scalar
-                                safe_dict[k] = v.item()
-                            else:
-                                safe_dict[k] = str(v)
-                        json_safe_summary[key] = safe_dict
-                    elif isinstance(value, (np.integer, np.int64, np.int32)):
-                        json_safe_summary[key] = int(value)
-                    elif isinstance(value, (np.floating, np.float64, np.float32)):
-                        json_safe_summary[key] = float(value)
-                    elif isinstance(value, np.ndarray):
-                        json_safe_summary[key] = value.tolist()
-                    elif hasattr(value, 'item'):  # numpy scalar
-                        json_safe_summary[key] = value.item()
-                    else:
-                        json_safe_summary[key] = str(value)
+            plots_safe = convert_numpy_types(plots)
+            data_info_safe = convert_numpy_types(getattr(pipeline, 'data_info', {}))
             
             backend_manager.emit_progress(session_id, "Training completed successfully!", 100, {
                 'model_summary': json_safe_summary,
-                'plots': plots,
-                'dataset_info': pipeline.data_info
+                'plots': plots_safe,
+                'dataset_info': data_info_safe
             })
             
         except Exception as e:
