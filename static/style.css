@@ -196,13 +196,14 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; back
 
 /* Visualizations */
 .visualizations { margin-top: 2rem; }
-.visualizations h3 { color: var(--text-primary); margin-bottom: 1.5rem; }
-.viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 2rem; margin-top: 1.5rem; }
-.viz-card { background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: var(--radius-lg); padding: 1.5rem; }
-.viz-card h4 { margin-bottom: 1rem; color: var(--text-primary); }
-.viz-content { min-height: 300px; display: flex; align-items: center; justify-content: center; }
-.viz-placeholder, .no-visualizations { color: var(--text-muted); font-style: italic; }
-.no-visualizations { text-align: center; padding: 2rem; }
+.viz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-top: 1rem; }
+.viz-card { background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: var(--radius-lg); padding: 1.5rem; transition: var(--transition-normal); }
+.viz-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.viz-card h4 { margin: 0 0 1rem 0; color: var(--text-primary); font-size: 1.1rem; }
+.viz-content { text-align: center; }
+.viz-content img { border-radius: var(--radius-md); box-shadow: var(--shadow-md); }
+.viz-placeholder { padding: 3rem; background: var(--bg-secondary); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 1.1rem; }
+.no-visualizations { text-align: center; padding: 3rem; color: var(--text-secondary); background: var(--bg-secondary); border-radius: var(--radius-lg); }
 
 /* Loading States */
 .loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border-primary); border-radius: 50%; border-top-color: var(--text-accent); animation: spin 1s ease-in-out infinite; }
@@ -269,6 +270,45 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; back
 .outlier-column { background: var(--bg-glass); border: 1px solid var(--border-primary); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; }
 .outlier-column h5 { color: var(--text-primary); margin-bottom: 0.5rem; }
 .outlier-column p { color: var(--text-secondary); margin-bottom: 0.5rem; }
+
+/* Prediction Interface */
+.prediction-container { display: grid; gap: 2rem; margin-top: 1rem; }
+.prediction-form { background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: var(--radius-lg); padding: 2rem; }
+.feature-input-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.input-group { display: flex; flex-direction: column; gap: 0.5rem; }
+.input-group label { font-weight: 600; color: var(--text-primary); font-size: 0.9rem; }
+.feature-input { padding: 0.75rem; border: 1px solid var(--border-primary); border-radius: var(--radius-md); background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; transition: var(--transition-normal); }
+.feature-input:focus { outline: none; border-color: var(--text-accent); box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2); }
+.feature-input:invalid { border-color: #ef4444; }
+
+/* Prediction Results */
+.prediction-result-card { background: linear-gradient(135deg, var(--primary-gradient)); border-radius: var(--radius-lg); padding: 2rem; text-align: center; color: white; margin-top: 1rem; box-shadow: var(--shadow-lg); }
+.prediction-result-card h4 { margin: 0 0 1rem 0; font-size: 1.2rem; }
+.result-value { margin: 1.5rem 0; }
+.result-number { font-size: 2.5rem; font-weight: bold; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3); }
+.result-meta { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.3); }
+.meta-row { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+.meta-label { font-size: 0.8rem; opacity: 0.9; }
+.meta-value { font-weight: 600; font-size: 0.9rem; }
+
+/* Batch Prediction Modal */
+.batch-results-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+.batch-results-content { background: var(--bg-primary); border-radius: var(--radius-lg); width: 90%; max-width: 1000px; max-height: 80%; overflow: hidden; display: flex; flex-direction: column; }
+.batch-results-header { display: flex; justify-content: space-between; align-items: center; padding: 1.5rem; border-bottom: 1px solid var(--border-primary); }
+.batch-results-header h3 { margin: 0; color: var(--text-primary); }
+.close-batch-results { background: none; border: none; font-size: 1.5rem; color: var(--text-secondary); cursor: pointer; padding: 0.5rem; }
+.close-batch-results:hover { color: var(--text-primary); }
+.batch-results-summary { padding: 1rem 1.5rem; background: var(--bg-secondary); border-bottom: 1px solid var(--border-primary); }
+.batch-results-summary p { margin: 0.5rem 0; color: var(--text-primary); }
+.batch-results-table { flex: 1; padding: 1.5rem; overflow-y: auto; }
+.download-csv-btn { background: var(--primary-gradient); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: var(--radius-md); cursor: pointer; margin-bottom: 1rem; font-weight: 600; }
+.download-csv-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+.table-container { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border-primary); }
+.batch-results-table table { width: 100%; border-collapse: collapse; background: var(--bg-primary); }
+.batch-results-table th, .batch-results-table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border-primary); color: var(--text-primary); }
+.batch-results-table th { background: var(--bg-secondary); font-weight: 600; }
+.batch-results-table tr:hover { background: var(--bg-secondary); }
+.table-note { margin-top: 1rem; text-align: center; color: var(--text-secondary); font-size: 0.9rem; }
 
 /* Button Sizes */
 .btn-sm { padding: 0.5rem 1rem; font-size: 0.85rem; }
