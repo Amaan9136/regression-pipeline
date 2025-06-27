@@ -429,26 +429,6 @@ class MLPipelineApp {
         }
     }
     
-    updateTrainingProgress(data) {
-        const progressBar = document.getElementById('training-progress-bar');
-        const progressText = document.getElementById('training-progress-text');
-        const progressPercentage = document.getElementById('training-progress-percentage');
-        
-        if (progressBar) {
-            progressBar.style.width = `${data.progress}%`;
-        }
-        
-        if (progressText) {
-            progressText.textContent = data.message;
-        }
-        
-        if (progressPercentage) {
-            progressPercentage.textContent = `${data.progress}%`;
-        }
-        
-        console.log(`Training progress: ${data.progress}% - ${data.message}`);
-    }
-    
     handleTrainingCompletion(data) {
         this.trainingInProgress = false;
         this.updateTrainingUI(false);
@@ -702,26 +682,6 @@ class MLPipelineApp {
         if (overlay) overlay.style.display = 'none';
     }
     
-    addActivityLog(message, type = 'info', progress = null) {
-        const activityList = document.getElementById('activity-list');
-        if (!activityList) return;
-        
-        const timestamp = new Date().toLocaleTimeString();
-        const logItem = document.createElement('div');
-        logItem.className = `activity-item activity-${type}`;
-        logItem.innerHTML = `
-            <div class="activity-timestamp">${timestamp}</div>
-            <div class="activity-message">${message}</div>
-            ${progress !== null ? `<div class="activity-progress">${progress}%</div>` : ''}
-        `;
-        
-        activityList.insertBefore(logItem, activityList.firstChild);
-        
-        while (activityList.children.length > this.config.MAX_ACTIVITY_LOGS) {
-            activityList.removeChild(activityList.lastChild);
-        }
-    }
-    
     updateConnectionStatus(connected) {
         const statusIndicator = document.getElementById('health-indicator');
         const connectionStatus = document.getElementById('connection-status');
@@ -918,59 +878,254 @@ class MLPipelineApp {
             html += `<div class="summary-stats">`;
             html += `<span class="stat">Models Trained: <strong>${trainingSummary.models_trained || Object.keys(modelSummary).length}</strong></span>`;
             if (trainingSummary.best_model_name && trainingSummary.best_model_name !== 'None') {
-                html += `<span class="stat">Best Model: <strong>${trainingSummary.best_model_name.replace(/_/g, ' ')}</strong></span>`;
+                html += `<span class="stat">Best Model: <strong>${trainingSummary.best_model_name}</strong></span>`;
                 html += `<span class="stat">Best Score: <strong>${(trainingSummary.best_score || 0).toFixed(4)}</strong></span>`;
             }
             html += `</div>`;
         } else {
-            html += `<div class="error-message">❌ Training encountered issues</div>`;
+            html += `<div class="error-message">❌ Training failed</div>`;
+            if (trainingSummary.error) {
+                html += `<div class="error-details">${trainingSummary.error}</div>`;
+            }
         }
         html += '</div>';
-        
-        // Display individual model results
+
+        // Display model comparison table
         if (Object.keys(modelSummary).length > 0) {
-            html += '<div class="models-grid">';
-            Object.entries(modelSummary).forEach(([modelName, metrics]) => {
-                const displayName = modelName.replace(/_/g, ' ');
-                
-                html += `
-                    <div class="model-card" onclick="app.showModelDetails('${modelName}')">
-                        <h5>${displayName}</h5>
-                        <div class="model-metrics">
-                            <div class="metric">
-                                <span class="metric-name">R² Score:</span>
-                                <span class="metric-value">${this.formatMetric(metrics.r2_score || metrics.r2 || 0)}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-name">RMSE:</span>
-                                <span class="metric-value">${this.formatMetric(metrics.rmse || 0)}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-name">MAE:</span>
-                                <span class="metric-value">${this.formatMetric(metrics.mae || 0)}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-name">CV Mean:</span>
-                                <span class="metric-value">${this.formatMetric(metrics.cv_mean || 0)}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
+            html += '<div class="model-comparison-table">';
+            html += '<h5>📊 Model Performance Comparison</h5>';
+            html += '<table class="comparison-table">';
+            html += '<thead><tr><th>Model</th><th>R² Score</th><th>RMSE</th><th>MAE</th><th>CV Mean</th><th>CV Std</th></tr></thead>';
+            html += '<tbody>';
+            
+            // Sort models by R² score
+            const sortedModels = Object.entries(modelSummary).sort((a, b) => (b[1].r2_score || 0) - (a[1].r2_score || 0));
+            
+            sortedModels.forEach(([modelName, metrics], index) => {
+                const isBest = index === 0;
+                html += `<tr class="${isBest ? 'best-model' : ''}">`;
+                html += `<td>${modelName}${isBest ? ' 🏆' : ''}</td>`;
+                html += `<td>${(metrics.r2_score || 0).toFixed(4)}</td>`;
+                html += `<td>${(metrics.rmse || 0).toFixed(4)}</td>`;
+                html += `<td>${(metrics.mae || 0).toFixed(4)}</td>`;
+                html += `<td>${(metrics.cv_mean || 0).toFixed(4)}</td>`;
+                html += `<td>${(metrics.cv_std || 0).toFixed(4)}</td>`;
+                html += '</tr>';
             });
+            
+            html += '</tbody></table>';
             html += '</div>';
             
-            this.populateModelSelectors(Object.keys(modelSummary));
-            
-        } else {
-            html += `
-                <div class="no-results">
-                    <p>No model results to display. Check the console for training details.</p>
-                </div>
-            `;
+            // Update prediction models for the prediction section
+            this.predictionModels = Object.keys(modelSummary);
+            this.updatePredictionModelSelect();
         }
-        
+
+        // Display dataset info
+        if (data.dataset_info) {
+            html += '<div class="dataset-info">';
+            html += '<h5>📋 Dataset Information</h5>';
+            html += `<div class="info-grid">`;
+            html += `<span>Shape: <strong>${data.dataset_info.shape[0]} rows × ${data.dataset_info.shape[1]} columns</strong></span>`;
+            html += `<span>Target Column: <strong>${data.dataset_info.target_column}</strong></span>`;
+            html += `<span>Features: <strong>${data.dataset_info.features.length}</strong></span>`;
+            html += `</div>`;
+            html += '</div>';
+        }
+
         html += '</div>';
         resultsContainer.innerHTML = html;
+
+        // Display visualizations
+        this.displayVisualizations(data.plots || {});
+        
+        // Store results for later use
+        this.modelResults = modelSummary;
+        this.datasetInfo = data.dataset_info;
+    }
+
+    displayVisualizations(plots) {
+        const vizContainer = document.getElementById('visualizations-container');
+        if (!vizContainer) return;
+
+        let html = '<div class="visualizations"><h3>📈 Visualizations</h3>';
+
+        if (Object.keys(plots).length > 0) {
+            html += '<div class="viz-grid">';
+            
+            Object.entries(plots).forEach(([plotType, plotData]) => {
+                html += `<div class="viz-card">`;
+                html += `<h4>${this.formatPlotTitle(plotType)}</h4>`;
+                html += `<div class="viz-content">`;
+                
+                if (plotData && plotData !== 'No data available') {
+                    if (plotData.startsWith('static/') || plotData.startsWith('/static/')) {
+                        // Image path
+                        html += `<img src="${plotData}" alt="${plotType}" style="max-width: 100%; height: auto;">`;
+                    } else {
+                        // Plot data or placeholder
+                        html += `<div class="viz-placeholder">📊 ${plotData}</div>`;
+                    }
+                } else {
+                    html += `<div class="viz-placeholder">No ${plotType} data available</div>`;
+                }
+                
+                html += `</div></div>`;
+            });
+            
+            html += '</div>';
+        } else {
+            html += '<div class="no-visualizations">No visualizations available</div>';
+        }
+
+        html += '</div>';
+        vizContainer.innerHTML = html;
+    }
+
+    updatePredictionModelSelect() {
+        const modelSelect = document.getElementById('prediction-model-select');
+        if (!modelSelect) return;
+
+        // Clear existing options except the first one
+        modelSelect.innerHTML = '<option value="">Choose a trained model...</option>';
+
+        // Add model options
+        this.predictionModels.forEach(modelName => {
+            const option = document.createElement('option');
+            option.value = modelName;
+            option.textContent = modelName;
+            modelSelect.appendChild(option);
+        });
+
+        // Update feature inputs based on dataset info
+        this.updateFeatureInputs();
+    }
+
+    updateFeatureInputs() {
+        const featureInputsContainer = document.getElementById('feature-inputs');
+        if (!featureInputsContainer || !this.datasetInfo) return;
+
+        let html = '<h4>Feature Values</h4>';
+        html += '<div class="feature-input-grid">';
+
+        this.datasetInfo.features.forEach(feature => {
+            html += `<div class="input-group">`;
+            html += `<label for="feature-${feature}">${feature}</label>`;
+            html += `<input type="number" id="feature-${feature}" name="${feature}" 
+                    class="feature-input" step="any" placeholder="Enter ${feature}">`;
+            html += `</div>`;
+        });
+
+        html += '</div>';
+        featureInputsContainer.innerHTML = html;
+    }
+
+    displayPredictionResult(result) {
+        const resultContainer = document.getElementById('prediction-result');
+        if (!resultContainer) return;
+
+        const html = `
+            <div class="prediction-result">
+                <h4>🔮 Prediction Result</h4>
+                <div class="result-value">
+                    <strong>${result.prediction.toFixed(4)}</strong>
+                </div>
+                <div class="result-meta">
+                    <span>Model: ${result.model_name}</span>
+                    <span>Confidence: ${(result.confidence || 0.95).toFixed(3)}</span>
+                </div>
+            </div>
+        `;
+        
+        resultContainer.innerHTML = html;
+    }
+
+    formatPlotTitle(plotType) {
+        const titles = {
+            'model_comparison': 'Model Performance Comparison',
+            'feature_importance': 'Feature Importance Analysis',
+            'residual_plots': 'Residual Analysis',
+            'best_scatter': 'Predicted vs Actual (Best Model)',
+            'heatmap': 'Performance Metrics Heatmap'
+        };
+        return titles[plotType] || plotType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    updateTrainingProgress(data) {
+        const progressBar = document.getElementById('training-progress-bar');
+        const progressText = document.getElementById('training-progress-text');
+        const progressPercentage = document.getElementById('training-progress-percentage');
+        
+        if (progressBar) {
+            progressBar.style.width = `${data.progress}%`;
+            progressBar.style.transition = 'width 0.3s ease-in-out';
+        }
+        
+        if (progressText) {
+            progressText.textContent = data.message;
+            // Add fade effect for new messages
+            progressText.style.opacity = '0.7';
+            setTimeout(() => {
+                if (progressText) progressText.style.opacity = '1';
+            }, 100);
+        }
+        
+        if (progressPercentage) {
+            progressPercentage.textContent = `${Math.round(data.progress)}%`;
+        }
+        
+        // Add live activity log
+        this.addActivityLog(data.message, 'info', data.progress);
+        
+        console.log(`Training progress: ${data.progress}% - ${data.message}`);
+        
+        // Auto-scroll to show progress if not visible
+        const progressContainer = document.getElementById('training-progress-container');
+        if (progressContainer && data.progress > 0) {
+            progressContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    addActivityLog(message, type = 'info', progress = null) {
+        const activityList = document.getElementById('activity-list');
+        if (!activityList) return;
+
+        const timestamp = new Date().toLocaleTimeString();
+        const progressInfo = progress !== null ? ` (${Math.round(progress)}%)` : '';
+        
+        const logItem = document.createElement('div');
+        logItem.className = `activity-item ${type}`;
+        logItem.innerHTML = `
+            <span class="activity-time">${timestamp}</span>
+            <span class="activity-message">${message}${progressInfo}</span>
+            <span class="activity-type">${this.getActivityIcon(type)}</span>
+        `;
+        
+        // Insert at top
+        activityList.insertBefore(logItem, activityList.firstChild);
+        
+        // Limit logs
+        const logs = activityList.querySelectorAll('.activity-item');
+        if (logs.length > this.config.MAX_ACTIVITY_LOGS) {
+            logs[logs.length - 1].remove();
+        }
+        
+        // Auto-remove old logs
+        setTimeout(() => {
+            if (logItem.parentNode) {
+                logItem.style.opacity = '0.5';
+            }
+        }, this.config.ALERT_AUTO_REMOVE_DELAY * 2);
+    }
+
+    getActivityIcon(type) {
+        const icons = {
+            'success': '✅',
+            'error': '❌',
+            'warning': '⚠️',
+            'info': 'ℹ️'
+        };
+        return icons[type] || 'ℹ️';
     }
 
     populateModelSelectors(modelNames) {
@@ -993,43 +1148,6 @@ class MLPipelineApp {
 
     formatMetricName(name) {
         return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    }
-    
-    displayPredictionResult(result) {
-        const resultsDiv = document.getElementById('prediction-result');
-        if (!resultsDiv) return;
-        
-        resultsDiv.innerHTML = `
-            <div class="prediction-result-card">
-                <h4>🔮 Prediction Result</h4>
-                <div class="prediction-value">
-                    <span class="prediction-label">Predicted Value:</span>
-                    <span class="prediction-number">${result.prediction.toFixed(4)}</span>
-                </div>
-                <div class="prediction-details">
-                    <p><strong>Model Used:</strong> ${result.model_used}</p>
-                    <p><strong>Features:</strong> ${Object.entries(result.features_used).map(([k,v]) => `${k}: ${v}`).join(', ')}</p>
-                </div>
-            </div>
-        `;
-    }
-    
-    displayVisualizations(plots) {
-        const plotsContainer = document.getElementById('visualizations-container');
-        if (!plotsContainer) return;
-        
-        let html = '<div class="plots-grid">';
-        Object.entries(plots).forEach(([plotName, plotData]) => {
-            html += `
-                <div class="plot-card">
-                    <h5>${plotName}</h5>
-                    <div class="plot-container" id="plot-${plotName}"></div>
-                </div>
-            `;
-        });
-        html += '</div>';
-        
-        plotsContainer.innerHTML = html;
     }
     
     async startHealthCheck() {
@@ -1065,17 +1183,6 @@ class MLPipelineApp {
                 }
             }
         }, this.config.HEALTH_CHECK_INTERVAL);
-    }
-    
-    formatMetric(value) {
-        if (value === null || value === undefined || isNaN(value)) {
-            return 'N/A';
-        }
-        return typeof value === 'number' ? value.toFixed(4) : value.toString();
-    }
-    
-    formatMetricName(name) {
-        return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
     
     renderCleaningSummary(summary) {

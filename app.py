@@ -1,4 +1,6 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask_socketio import join_room, leave_room
+import time
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 import pandas as pd
 import numpy as np
@@ -66,33 +68,33 @@ class BackendManager:
         return self.active_sessions.get(session_id)
     
     def emit_progress(self, session_id, message, progress, data=None):
-        with app.app_context():
-            try:
-                # Convert data to JSON-safe format before emitting
-                safe_data = convert_numpy_types(data) if data else None
+        """Enhanced progress emission with better error handling"""
+        try:
+            # Convert data to JSON-safe format
+            safe_data = convert_numpy_types(data) if data else None
+            
+            # Create payload
+            payload = {
+                'message': str(message),
+                'progress': min(100, max(0, float(progress))),  # Ensure progress is 0-100
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Add data if provided
+            if safe_data:
+                payload['data'] = safe_data
+            
+            # Test JSON serialization
+            json.dumps(payload)
+            
+            # Emit to specific room
+            with app.app_context():
+                socketio.emit('training_progress', payload, room=session_id)
                 
-                # Test JSON serialization before emitting
-                test_payload = {
-                    'message': message,
-                    'progress': progress,
-                    'data': safe_data,
-                    'timestamp': datetime.now().isoformat()
-                }
-                json.dumps(test_payload) 
-                
-                socketio.emit('training_progress', test_payload, room=session_id)
-                
-            except (TypeError, ValueError) as e:
-                logger.error(f"JSON serialization error in emit_progress: {e}")
-                logger.error(f"Problematic data: {data}")
-                
-                # Fallback: emit without data
-                socketio.emit('training_progress', {
-                    'message': message,
-                    'progress': progress,
-                    'data': {'error': 'Data serialization failed'},
-                    'timestamp': datetime.now().isoformat()
-                }, room=session_id)
+            logger.info(f"Progress emitted to {session_id}: {progress}% - {message}")
+            
+        except Exception as e:
+            logger.error(f"Failed to emit progress: {e}")
 
 backend_manager = BackendManager()
 
@@ -336,6 +338,7 @@ def health_check():
 def handle_connect():
     session_id = str(uuid.uuid4())
     backend_manager.create_session(session_id)
+    join_room(session_id)
     emit('session_created', {'session_id': session_id})
     logger.info(f"Client connected with session: {session_id}")
 
@@ -348,6 +351,7 @@ def handle_training(data):
     session_id = data.get('session_id')
     dataset = data.get('dataset')
     config = data.get('config', {})
+    join_room(session_id)
     
     default_config = {
         'test_size': 0.2,
