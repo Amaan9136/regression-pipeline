@@ -224,6 +224,7 @@ class MLPipelineApp {
                 this.currentDataset = filename;
                 this.datasetInfo = result.info;
                 
+                // Debug logging
                 console.log('Dataset info received:', result.info);
                 console.log('Columns type:', typeof result.info.columns, result.info.columns);
                 
@@ -451,14 +452,22 @@ class MLPipelineApp {
     handleTrainingCompletion(data) {
         this.trainingInProgress = false;
         this.updateTrainingUI(false);
-        this.modelResults = data.model_summary || {};
+        
+        // Store results with fallback handling
+        this.modelResults = data.model_summary || data.model_summaries || {};
         this.visualizations = data.plots || {};
         
-        this.displayTrainingResults(data);
-        this.addActivityLog('Training completed successfully!', 'success');
-        this.showAlert('Training completed successfully!', 'success');
+        console.log('Training completed with data:', data);
         
-        this.switchSection('results');
+        try {
+            this.displayTrainingResults(data);
+            this.addActivityLog('Training completed successfully!', 'success');
+            this.showAlert('Training completed successfully!', 'success');
+            this.switchSection('results');
+        } catch (error) {
+            console.error('Error displaying training results:', error);
+            this.showAlert('Training completed, but there was an error displaying results', 'warning');
+        }
     }
     
     handleTrainingError(error) {
@@ -810,15 +819,33 @@ class MLPipelineApp {
         
         let html = '<div class="outliers-summary"><h4>🔍 Detected Outliers</h4>';
         
-        if (Object.keys(outliers).length === 0) {
+        if (!outliers || Object.keys(outliers).length === 0) {
             html += '<p>No outliers detected in the dataset.</p>';
         } else {
             html += '<div class="outliers-list">';
-            Object.entries(outliers).forEach(([column, indices]) => {
+            Object.entries(outliers).forEach(([column, data]) => {
+                const count = data.count || 0;
+                const indices = data.indices || [];
+                const percentage = data.percentage || 0;
+                
+                // Ensure indices is an array
+                const indicesArray = Array.isArray(indices) ? indices : [];
+                
                 html += `
                     <div class="outlier-column">
                         <h5>${column}</h5>
-                        <p>${indices.length} outliers found at indices: ${indices.slice(0, 10).join(', ')}${indices.length > 10 ? '...' : ''}</p>
+                        <p>${count} outliers found (${percentage.toFixed(2)}% of data)</p>
+                        ${indicesArray.length > 0 ? `
+                            <p>Sample indices: ${indicesArray.slice(0, 10).join(', ')}${indicesArray.length > 10 ? '...' : ''}</p>
+                            <div class="outlier-actions">
+                                <button class="btn btn-sm btn-secondary" onclick="app.viewColumnOutliers('${column}')">
+                                    View Details
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="app.removeColumnOutliers('${column}', ${JSON.stringify(indicesArray)})">
+                                    Remove Outliers
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                 `;
             });
@@ -827,6 +854,23 @@ class MLPipelineApp {
         
         html += '</div>';
         outliersContainer.innerHTML = html;
+    }
+    
+    viewColumnOutliers(column) {
+        this.showAlert(`Viewing outliers for column: ${column}`, 'info');
+    }
+    
+    removeColumnOutliers(column, indices) {
+        if (!this.cleaningOperations.remove_outliers) {
+            this.cleaningOperations.remove_outliers = [];
+        }
+        
+        // Ensure indices is an array
+        const indicesArray = Array.isArray(indices) ? indices : [];
+        this.cleaningOperations.remove_outliers = [...new Set([...this.cleaningOperations.remove_outliers, ...indicesArray])];
+        
+        this.showAlert(`Marked ${indicesArray.length} outliers from ${column} for removal`, 'success');
+        this.addActivityLog(`Marked outliers for removal: ${column}`, 'info');
     }
     
     displayCleaningResults(results) {
@@ -861,16 +905,27 @@ class MLPipelineApp {
         
         let html = '<div class="training-results-summary"><h4>🎯 Training Results</h4>';
         
-        if (data.model_summary) {
+        // Handle different result structures
+        const modelSummary = data.model_summary || data.model_summaries || {};
+        
+        if (Object.keys(modelSummary).length > 0) {
             html += '<div class="models-grid">';
-            Object.entries(data.model_summary).forEach(([model, metrics]) => {
+            Object.entries(modelSummary).forEach(([model, metrics]) => {
+                // Handle different metric structures
+                let displayMetrics = {};
+                if (typeof metrics === 'object' && metrics !== null) {
+                    displayMetrics = metrics;
+                } else {
+                    displayMetrics = { trained: true };
+                }
+                
                 html += `
                     <div class="model-card" onclick="app.showModelDetails('${model}')">
-                        <h5>${model}</h5>
+                        <h5>${model.replace(/_/g, ' ')}</h5>
                         <div class="model-metrics">
-                            ${Object.entries(metrics).slice(0, 3).map(([metric, value]) => `
+                            ${Object.entries(displayMetrics).slice(0, 4).map(([metric, value]) => `
                                 <div class="metric">
-                                    <span class="metric-name">${metric}:</span>
+                                    <span class="metric-name">${this.formatMetricName(metric)}:</span>
                                     <span class="metric-value">${this.formatMetric(value)}</span>
                                 </div>
                             `).join('')}
@@ -879,10 +934,23 @@ class MLPipelineApp {
                 `;
             });
             html += '</div>';
+        } else {
+            // Fallback display
+            html += `
+                <div class="training-info">
+                    <p>✅ Training completed successfully!</p>
+                    <p>Models trained: ${data.models_trained || 'Multiple'}</p>
+                    ${data.best_model_name ? `<p>Best model: ${data.best_model_name}</p>` : ''}
+                    ${data.best_score ? `<p>Best score: ${this.formatMetric(data.best_score)}</p>` : ''}
+                </div>
+            `;
         }
         
         html += '</div>';
         resultsContainer.innerHTML = html;
+        
+        // Store results for modal display
+        this.modelResults = modelSummary;
         
         if (data.plots) {
             this.displayVisualizations(data.plots);
