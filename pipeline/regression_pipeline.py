@@ -310,7 +310,8 @@ class RegressionPipeline:
         
         # Save models
         self._save_models()
-    
+        return self.results
+
     def _calculate_metrics(self, y_true, y_pred):
         """Calculate regression metrics"""
         return {

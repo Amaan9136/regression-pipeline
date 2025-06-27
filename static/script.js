@@ -903,58 +903,96 @@ class MLPipelineApp {
         const resultsContainer = document.getElementById('training-results');
         if (!resultsContainer) return;
         
+        console.log('Displaying training results:', data);
+        
         let html = '<div class="training-results-summary"><h4>🎯 Training Results</h4>';
         
-        // Handle different result structures
-        const modelSummary = data.model_summary || data.model_summaries || {};
+        // Handle the training summary
+        const trainingSummary = data.training_summary || {};
+        const modelSummary = data.model_summary || trainingSummary.model_summary || {};
         
+        // Display overall summary
+        html += '<div class="training-overview">';
+        if (trainingSummary.training_completed) {
+            html += `<div class="success-message">✅ Training completed successfully!</div>`;
+            html += `<div class="summary-stats">`;
+            html += `<span class="stat">Models Trained: <strong>${trainingSummary.models_trained || Object.keys(modelSummary).length}</strong></span>`;
+            if (trainingSummary.best_model_name && trainingSummary.best_model_name !== 'None') {
+                html += `<span class="stat">Best Model: <strong>${trainingSummary.best_model_name.replace(/_/g, ' ')}</strong></span>`;
+                html += `<span class="stat">Best Score: <strong>${(trainingSummary.best_score || 0).toFixed(4)}</strong></span>`;
+            }
+            html += `</div>`;
+        } else {
+            html += `<div class="error-message">❌ Training encountered issues</div>`;
+        }
+        html += '</div>';
+        
+        // Display individual model results
         if (Object.keys(modelSummary).length > 0) {
             html += '<div class="models-grid">';
-            Object.entries(modelSummary).forEach(([model, metrics]) => {
-                // Handle different metric structures
-                let displayMetrics = {};
-                if (typeof metrics === 'object' && metrics !== null) {
-                    displayMetrics = metrics;
-                } else {
-                    displayMetrics = { trained: true };
-                }
+            Object.entries(modelSummary).forEach(([modelName, metrics]) => {
+                const displayName = modelName.replace(/_/g, ' ');
                 
                 html += `
-                    <div class="model-card" onclick="app.showModelDetails('${model}')">
-                        <h5>${model.replace(/_/g, ' ')}</h5>
+                    <div class="model-card" onclick="app.showModelDetails('${modelName}')">
+                        <h5>${displayName}</h5>
                         <div class="model-metrics">
-                            ${Object.entries(displayMetrics).slice(0, 4).map(([metric, value]) => `
-                                <div class="metric">
-                                    <span class="metric-name">${this.formatMetricName(metric)}:</span>
-                                    <span class="metric-value">${this.formatMetric(value)}</span>
-                                </div>
-                            `).join('')}
+                            <div class="metric">
+                                <span class="metric-name">R² Score:</span>
+                                <span class="metric-value">${this.formatMetric(metrics.r2_score || metrics.r2 || 0)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-name">RMSE:</span>
+                                <span class="metric-value">${this.formatMetric(metrics.rmse || 0)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-name">MAE:</span>
+                                <span class="metric-value">${this.formatMetric(metrics.mae || 0)}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-name">CV Mean:</span>
+                                <span class="metric-value">${this.formatMetric(metrics.cv_mean || 0)}</span>
+                            </div>
                         </div>
                     </div>
                 `;
             });
             html += '</div>';
+            
+            this.populateModelSelectors(Object.keys(modelSummary));
+            
         } else {
-            // Fallback display
             html += `
-                <div class="training-info">
-                    <p>✅ Training completed successfully!</p>
-                    <p>Models trained: ${data.models_trained || 'Multiple'}</p>
-                    ${data.best_model_name ? `<p>Best model: ${data.best_model_name}</p>` : ''}
-                    ${data.best_score ? `<p>Best score: ${this.formatMetric(data.best_score)}</p>` : ''}
+                <div class="no-results">
+                    <p>No model results to display. Check the console for training details.</p>
                 </div>
             `;
         }
         
         html += '</div>';
         resultsContainer.innerHTML = html;
-        
-        // Store results for modal display
-        this.modelResults = modelSummary;
-        
-        if (data.plots) {
-            this.displayVisualizations(data.plots);
+    }
+
+    populateModelSelectors(modelNames) {
+        const modelSelect = document.getElementById('prediction-model-select');
+        if (modelSelect && modelNames.length > 0) {
+            modelSelect.innerHTML = '<option value="">Choose a trained model...</option>';
+            modelNames.forEach(modelName => {
+                const displayName = modelName.replace(/_/g, ' ');
+                modelSelect.innerHTML += `<option value="${modelName}">${displayName}</option>`;
+            });
         }
+    }
+
+    formatMetric(value) {
+        if (typeof value === 'number') {
+            return value.toFixed(4);
+        }
+        return value || 'N/A';
+    }
+
+    formatMetricName(name) {
+        return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
     
     displayPredictionResult(result) {
