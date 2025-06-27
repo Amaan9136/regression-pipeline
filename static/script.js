@@ -861,19 +861,22 @@ class MLPipelineApp {
     
     displayTrainingResults(data) {
         const resultsContainer = document.getElementById('training-results');
-        if (!resultsContainer) return;
+        if (!resultsContainer) {
+            console.error('Training results container not found');
+            this.showAlert('Error: Results display container not found', 'error');
+            return;
+        }
         
         console.log('Displaying training results:', data);
         
         let html = '<div class="training-results-summary"><h4>🎯 Training Results</h4>';
         
-        // Handle the training summary
+        // Handle the training summary with proper null checks
         const trainingSummary = data.training_summary || {};
         const modelSummary = data.model_summary || trainingSummary.model_summary || {};
         
-        // Display overall summary
         html += '<div class="training-overview">';
-        if (trainingSummary.training_completed) {
+        if (trainingSummary.training_completed || Object.keys(modelSummary).length > 0) {
             html += `<div class="success-message">✅ Training completed successfully!</div>`;
             html += `<div class="summary-stats">`;
             html += `<span class="stat">Models Trained: <strong>${trainingSummary.models_trained || Object.keys(modelSummary).length}</strong></span>`;
@@ -913,35 +916,34 @@ class MLPipelineApp {
                 html += '</tr>';
             });
             
-            html += '</tbody></table>';
-            html += '</div>';
-            
-            // Update prediction models for the prediction section
-            this.predictionModels = Object.keys(modelSummary);
-            this.updatePredictionModelSelect();
+            html += '</tbody></table></div>';
         }
 
-        // Display dataset info
-        if (data.dataset_info) {
-            html += '<div class="dataset-info">';
-            html += '<h5>📋 Dataset Information</h5>';
-            html += `<div class="info-grid">`;
-            html += `<span>Shape: <strong>${data.dataset_info.shape[0]} rows × ${data.dataset_info.shape[1]} columns</strong></span>`;
-            html += `<span>Target Column: <strong>${data.dataset_info.target_column}</strong></span>`;
-            html += `<span>Features: <strong>${data.dataset_info.features.length}</strong></span>`;
-            html += `</div>`;
+        // Display individual model cards for detailed view
+        if (Object.keys(modelSummary).length > 0) {
+            html += '<div class="models-grid">';
+            Object.entries(modelSummary).forEach(([modelName, metrics]) => {
+                html += `<div class="model-card" onclick="app.showModelDetails('${modelName}')">`;
+                html += `<h5>${modelName}</h5>`;
+                html += '<div class="model-metrics">';
+                html += `<div class="metric"><span class="metric-name">R² Score:</span><span class="metric-value">${(metrics.r2_score || 0).toFixed(4)}</span></div>`;
+                html += `<div class="metric"><span class="metric-name">RMSE:</span><span class="metric-value">${(metrics.rmse || 0).toFixed(4)}</span></div>`;
+                html += `<div class="metric"><span class="metric-name">MAE:</span><span class="metric-value">${(metrics.mae || 0).toFixed(4)}</span></div>`;
+                html += `<div class="metric"><span class="metric-name">CV Mean:</span><span class="metric-value">${(metrics.cv_mean || 0).toFixed(4)}</span></div>`;
+                html += `<div class="metric"><span class="metric-name">CV Std:</span><span class="metric-value">${(metrics.cv_std || 0).toFixed(4)}</span></div>`;
+                html += '</div></div>';
+            });
             html += '</div>';
         }
 
         html += '</div>';
-        resultsContainer.innerHTML = html;
-
-        // Display visualizations
-        this.displayVisualizations(data.plots || {});
-        
-        // Store results for later use
-        this.modelResults = modelSummary;
-        this.datasetInfo = data.dataset_info;
+        try {
+            resultsContainer.innerHTML = html;
+            console.log('Training results displayed successfully');
+        } catch (error) {
+            console.error('Error setting HTML content:', error);
+            this.showAlert('Error displaying results content', 'error');
+        }
     }
 
     displayVisualizations(plots) {
