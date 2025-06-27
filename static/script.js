@@ -260,11 +260,21 @@ class MLPipelineApp {
             applyCleaningBtn.addEventListener('click', () => this.applyDataCleaning());
         }
         
+        if (!this.cleaningOperations) {
+            this.cleaningOperations = {};
+        }
+        
         document.querySelectorAll('.cleaning-tab').forEach(tab => {
             tab.addEventListener('click', (e) => {
                 this.switchCleaningTab(e.target.dataset.tab);
             });
         });
+        
+        setTimeout(() => {
+            if (this.currentDataset) {
+                this.loadOverviewContent();
+            }
+        }, 100);
     }
     
     async detectOutliers() {
@@ -633,6 +643,156 @@ class MLPipelineApp {
             content.classList.remove('active');
         });
         document.getElementById(`${tabName}-content`)?.classList.add('active');
+        
+        if (tabName === 'missing') {
+            this.loadMissingValuesContent();
+        } else if (tabName === 'transformations') {
+            this.loadTransformationsContent();
+        } else if (tabName === 'overview') {
+            this.loadOverviewContent();
+        }
+    }
+
+    loadMissingValuesContent() {
+        if (!this.currentDataset) return;
+        
+        const container = document.getElementById('missing-values-display');
+        if (!container) return;
+        
+        fetch(`/api/dataset_info/${this.currentDataset}`)
+            .then(response => response.json())
+            .then(result => {
+                if (result.success && result.info.missing_values) {
+                    let html = '<div class="missing-values-section">';
+                    const missing = result.info.missing_values;
+                    
+                    if (Object.values(missing).every(val => val === 0)) {
+                        html += '<p>No missing values found in the dataset.</p>';
+                    } else {
+                        html += '<h5>Missing Values by Column:</h5><div class="missing-list">';
+                        Object.entries(missing).forEach(([col, count]) => {
+                            if (count > 0) {
+                                html += `
+                                    <div class="missing-item">
+                                        <span>${col}: ${count} missing</span>
+                                        <select class="form-select" onchange="app.setMissingStrategy('${col}', this.value)">
+                                            <option value="">Choose strategy...</option>
+                                            <option value="drop">Drop rows</option>
+                                            <option value="mean">Fill with mean</option>
+                                            <option value="median">Fill with median</option>
+                                            <option value="mode">Fill with mode</option>
+                                            <option value="forward">Forward fill</option>
+                                        </select>
+                                    </div>
+                                `;
+                            }
+                        });
+                        html += '</div>';
+                    }
+                    html += '</div>';
+                    container.innerHTML = html;
+                }
+            })
+            .catch(error => console.error('Error loading missing values:', error));
+    }
+
+    setMissingStrategy(column, strategy) {
+        if (!this.cleaningOperations.missing_values) {
+            this.cleaningOperations.missing_values = {};
+        }
+        this.cleaningOperations.missing_values[column] = strategy;
+        this.showAlert(`Set ${strategy} strategy for ${column}`, 'success');
+    }
+
+    loadTransformationsContent() {
+        if (!this.currentDataset) return;
+        
+        const container = document.getElementById('transformations-options');
+        if (!container) return;
+        
+        fetch(`/api/dataset_info/${this.currentDataset}`)
+            .then(response => response.json())
+            .then(result => {
+                if (result.success && result.info.columns) {
+                    let html = '<div class="transformations-section">';
+                    html += '<h5>Available Transformations:</h5>';
+                    html += '<div class="transform-options">';
+                    
+                    result.info.columns.forEach(col => {
+                        html += `
+                            <div class="transform-item">
+                                <label>${col}:</label>
+                                <select class="form-select" onchange="app.setTransformation('${col}', this.value)">
+                                    <option value="">No transformation</option>
+                                    <option value="log">Log transform</option>
+                                    <option value="sqrt">Square root</option>
+                                    <option value="standardize">Standardize</option>
+                                    <option value="normalize">Normalize</option>
+                                </select>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div></div>';
+                    container.innerHTML = html;
+                }
+            })
+            .catch(error => console.error('Error loading transformations:', error));
+    }
+
+    setTransformation(column, transform) {
+        if (!this.cleaningOperations.transformations) {
+            this.cleaningOperations.transformations = {};
+        }
+        if (transform) {
+            this.cleaningOperations.transformations[column] = transform;
+            this.showAlert(`Set ${transform} for ${column}`, 'success');
+        } else {
+            delete this.cleaningOperations.transformations[column];
+        }
+    }
+
+    loadOverviewContent() {
+        if (!this.currentDataset) return;
+        
+        const container = document.getElementById('data-quality-report');
+        if (!container) return;
+        
+        fetch(`/api/dataset_info/${this.currentDataset}`)
+            .then(response => response.json())
+            .then(result => {
+                if (result.success && result.info) {
+                    const info = result.info;
+                    let html = `
+                        <div class="quality-overview">
+                            <div class="quality-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Rows:</span>
+                                    <span class="stat-value">${info.shape[0]}</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Columns:</span>
+                                    <span class="stat-value">${info.shape[1]}</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Missing Values:</span>
+                                    <span class="stat-value">${Object.values(info.missing_values || {}).reduce((a, b) => a + b, 0)}</span>
+                                </div>
+                            </div>
+                            <div class="data-types">
+                                <h6>Data Types:</h6>
+                                <div class="types-list">
+                                    ${Object.entries(info.data_types || {}).map(([col, type]) => 
+                                        `<span class="type-item">${col}: ${type}</span>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    container.innerHTML = html;
+                }
+            })
+            .catch(error => console.error('Error loading overview:', error));
     }
     
     toggleAdvancedConfig(show) {
@@ -787,8 +947,6 @@ class MLPipelineApp {
                 const count = data.count || 0;
                 const indices = data.indices || [];
                 const percentage = data.percentage || 0;
-                
-                // Ensure indices is an array
                 const indicesArray = Array.isArray(indices) ? indices : [];
                 
                 html += `
@@ -814,10 +972,40 @@ class MLPipelineApp {
         
         html += '</div>';
         outliersContainer.innerHTML = html;
+        
+        // Auto-switch to outliers tab
+        this.switchCleaningTab('outliers');
     }
     
     viewColumnOutliers(column) {
-        this.showAlert(`Viewing outliers for column: ${column}`, 'info');
+        if (!this.currentDataset) {
+            this.showAlert('No dataset selected', 'warning');
+            return;
+        }
+        
+        fetch(`/api/detect_outliers/${this.currentDataset}`)
+            .then(response => response.json())
+            .then(result => {
+                if (result.success && result.outliers[column]) {
+                    const data = result.outliers[column];
+                    const indices = Array.isArray(data.indices) ? data.indices : [];
+                    let html = `
+                        <div class="outlier-details">
+                            <h5>Outliers in ${column}</h5>
+                            <p>Found ${data.count} outliers (${data.percentage.toFixed(2)}% of data)</p>
+                            <div class="outlier-indices">
+                                <h6>Row Indices:</h6>
+                                <div class="indices-list">${indices.slice(0, 50).join(', ')}${indices.length > 50 ? '...' : ''}</div>
+                            </div>
+                            <button class="btn btn-danger btn-sm" onclick="app.removeColumnOutliers('${column}', ${JSON.stringify(indices)})">
+                                Remove All ${data.count} Outliers
+                            </button>
+                        </div>
+                    `;
+                    document.getElementById('outliers-display').innerHTML += html;
+                }
+            })
+            .catch(error => this.showAlert(`Error viewing outliers: ${error.message}`, 'error'));
     }
     
     removeColumnOutliers(column, indices) {
@@ -1150,6 +1338,77 @@ class MLPipelineApp {
 
     formatMetricName(name) {
         return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    showModelDetails(modelName) {
+        const modal = document.getElementById('model-details-modal');
+        const modalBody = document.getElementById('model-details-body');
+        
+        if (!modal || !modalBody) {
+            this.showAlert('Modal not found', 'error');
+            return;
+        }
+        
+        const modelData = this.lastTrainingResults?.model_summary?.[modelName];
+        
+        if (!modelData) {
+            this.showAlert(`Model data not found for ${modelName}`, 'error');
+            return;
+        }
+        
+        modalBody.innerHTML = `
+            <div class="model-details-content">
+                <h4>${modelName} Details</h4>
+                <div class="model-metrics-detailed">
+                    <div class="metric-row">
+                        <span class="metric-label">R² Score:</span>
+                        <span class="metric-value">${(modelData.r2_score || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">RMSE:</span>
+                        <span class="metric-value">${(modelData.rmse || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">MAE:</span>
+                        <span class="metric-value">${(modelData.mae || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">CV Mean:</span>
+                        <span class="metric-value">${(modelData.cv_mean || 0).toFixed(6)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">CV Std:</span>
+                        <span class="metric-value">${(modelData.cv_std || 0).toFixed(6)}</span>
+                    </div>
+                </div>
+                ${modelData.feature_importance ? `
+                    <div class="feature-importance">
+                        <h5>Feature Importance</h5>
+                        <div class="importance-list">
+                            ${Object.entries(modelData.feature_importance).map(([feature, importance]) => `
+                                <div class="importance-item">
+                                    <span>${feature}</span>
+                                    <span>${importance.toFixed(4)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        modal.style.display = 'block';
+        
+        const closeBtn = modal.querySelector('.modal-close');
+        if (closeBtn) {
+            closeBtn.onclick = () => modal.style.display = 'none';
+        }
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
     }
     
     async startHealthCheck() {
